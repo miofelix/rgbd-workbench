@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -8,6 +9,8 @@ import rfc8785
 from pydantic import BaseModel
 
 from .contracts import ProcessingSpecV1, SceneManifestV1
+
+_DERIVATION_KEY = re.compile(r"^[a-f0-9]{64}$")
 
 
 def _jsonable(value: BaseModel | Mapping[str, Any]) -> Any:
@@ -28,6 +31,12 @@ def canonical_json_bytes(value: BaseModel | Mapping[str, Any]) -> bytes:
 
 def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def derivation_id_from_key(key: str) -> str:
+    if not _DERIVATION_KEY.fullmatch(key):
+        raise ValueError("derivation key must be a lowercase SHA-256 digest")
+    return f"derivation-{key}"
 
 
 def scene_hash(

@@ -16,6 +16,12 @@ from .diagnostics import Diagnostic
 
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$", strict=True)]
 VersionString = Annotated[str, StringConstraints(min_length=1, max_length=64, strict=True)]
+DerivationId = Annotated[
+    str,
+    StringConstraints(pattern=r"^derivation-[a-f0-9]{64}$", strict=True),
+]
+
+PROCESSOR_VERSION = "1"
 
 
 class StrictModel(BaseModel):
@@ -186,6 +192,88 @@ class ProcessingSpecV1(StrictModel):
             x_min, y_min, x_max, y_max = self.roi
             if x_min < 0 or y_min < 0 or x_min >= x_max or y_min >= y_max:
                 raise ValueError("roi must be a non-empty non-negative x/y rectangle")
+        return self
+
+
+ArrayDType = Literal["float32", "uint8", "uint32"]
+_ARRAY_ITEMSIZE: dict[str, int] = {"float32": 4, "uint8": 1, "uint32": 4}
+
+
+class ArrayDescriptorV1(StrictModel):
+    dtype: ArrayDType
+    shape: tuple[StrictInt, ...] = Field(min_length=1, max_length=3)
+    offset: StrictInt = Field(ge=0)
+    nbytes: StrictInt = Field(ge=0)
+
+    @model_validator(mode="after")
+    def payload_size_is_exact(self) -> ArrayDescriptorV1:
+        if any(dimension <= 0 for dimension in self.shape):
+            raise ValueError("array shape dimensions must be positive")
+        elements = 1
+        for dimension in self.shape:
+            elements *= dimension
+        expected = elements * _ARRAY_ITEMSIZE[self.dtype]
+        if self.nbytes != expected:
+            raise ValueError("array nbytes does not match dtype and shape")
+        return self
+
+
+class BoundsV1(StrictModel):
+    min: tuple[FiniteFloat, FiniteFloat, FiniteFloat]
+    max: tuple[FiniteFloat, FiniteFloat, FiniteFloat]
+
+    @model_validator(mode="after")
+    def axes_are_ordered(self) -> BoundsV1:
+        if any(low > high for low, high in zip(self.min, self.max, strict=True)):
+            raise ValueError("bounds min must not exceed max")
+        return self
+
+
+class DerivationManifestV1(StrictModel):
+    schema_version: Literal[1]
+    derivation_id: DerivationId
+    scene_id: Annotated[str, StringConstraints(min_length=1, max_length=128, strict=True)]
+    scene_hash: Sha256
+    derivation_key: Sha256
+    processor_version: VersionString
+    processing: ProcessingSpecV1
+    point_count: StrictInt = Field(gt=0, le=2_000_000)
+    source_shape: tuple[StrictInt, StrictInt]
+    frame: Annotated[str, StringConstraints(min_length=1, max_length=128, strict=True)]
+    unit: Literal["m", "unitless"]
+    representation: Literal["z_depth", "relative_z"]
+    bounds: BoundsV1
+    arrays: dict[str, ArrayDescriptorV1]
+    diagnostics: list[Diagnostic] = Field(default_factory=list)
+    created_at: Annotated[str, StringConstraints(min_length=1, max_length=64, strict=True)] | None = None
+
+    @model_validator(mode="after")
+    def arrays_and_semantics_are_consistent(self) -> DerivationManifestV1:
+        if self.representation == "relative_z" and self.unit != "unitless":
+            raise ValueError("relative_z derivations must be unitless")
+        if self.representation == "z_depth" and self.unit != "m":
+            raise ValueError("z_depth derivations must use meters")
+        if any(dimension <= 0 for dimension in self.source_shape):
+            raise ValueError("source_shape dimensions must be positive")
+        expected_names = {"positions", "colors", "pixel_index"}
+        if set(self.arrays) != expected_names:
+            raise ValueError("arrays must contain positions, colors, and pixel_index")
+        expected_shapes = {
+            "positions": (self.point_count, 3),
+            "colors": (self.point_count, 3),
+            "pixel_index": (self.point_count,),
+        }
+        expected_dtypes = {
+            "positions": "float32",
+            "colors": "uint8",
+            "pixel_index": "uint32",
+        }
+        for name in expected_names:
+            descriptor = self.arrays[name]
+            if descriptor.shape != expected_shapes[name]:
+                raise ValueError(f"{name} shape does not match point_count")
+            if descriptor.dtype != expected_dtypes[name]:
+                raise ValueError(f"{name} dtype is invalid")
         return self
 
 
