@@ -190,8 +190,8 @@ class ProcessingSpecV1(StrictModel):
                 raise ValueError("xyz_min must not exceed xyz_max")
         if self.roi is not None:
             x_min, y_min, x_max, y_max = self.roi
-            if x_min < 0 or y_min < 0 or x_min >= x_max or y_min >= y_max:
-                raise ValueError("roi must be a non-empty non-negative x/y rectangle")
+            if x_min >= x_max or y_min >= y_max:
+                raise ValueError("roi must be a non-empty x/y rectangle")
         return self
 
 
@@ -245,7 +245,9 @@ class DerivationManifestV1(StrictModel):
     bounds: BoundsV1
     arrays: dict[str, ArrayDescriptorV1]
     diagnostics: list[Diagnostic] = Field(default_factory=list)
-    created_at: Annotated[str, StringConstraints(min_length=1, max_length=64, strict=True)] | None = None
+    created_at: (
+        Annotated[str, StringConstraints(min_length=1, max_length=64, strict=True)] | None
+    ) = None
 
     @model_validator(mode="after")
     def arrays_and_semantics_are_consistent(self) -> DerivationManifestV1:
