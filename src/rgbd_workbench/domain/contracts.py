@@ -126,6 +126,11 @@ class RawDepthDescriptor(StrictModel):
     def validate_shape(self) -> RawDepthDescriptor:
         if len(self.shape) != 2 or any(item <= 0 for item in self.shape):
             raise ValueError("RAW shape must contain positive dimensions")
+        pixels = 1
+        for dimension in self.shape:
+            if pixels > 64 * 1024 * 1024 // dimension:
+                raise ValueError("RAW shape exceeds configured pixel limits")
+            pixels *= dimension
         return self
 
 

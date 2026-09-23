@@ -164,7 +164,14 @@ def _load_array(path: Path, metadata: dict[str, Any]) -> np.ndarray:
         shape = tuple(int(item) for item in descriptor["shape"])
         if len(shape) != 2:
             raise ValueError("RAW shape must be two-dimensional")
-        expected = int(np.prod(shape)) * dtype.itemsize
+        elements = 1
+        for dimension in shape:
+            if dimension <= 0 or elements > MAX_PIXELS // dimension:
+                raise ValueError("DEPTH_SIZE_LIMIT: RAW shape exceeds configured limits")
+            elements *= dimension
+        expected = elements * dtype.itemsize
+        if expected > MAX_ARRAY_BYTES:
+            raise ValueError("DEPTH_SIZE_LIMIT: RAW payload exceeds configured limits")
         if expected != path.stat().st_size:
             raise ValueError("RAW payload length does not match descriptor")
         return np.fromfile(path, dtype=dtype).reshape(shape)

@@ -284,7 +284,17 @@ def seed_import_from_paths(
                 registry.probe(staged_file.path, role), staged_file
             )
     manifest_candidate = probe_manifest(manifest_path) if manifest_path else None
-    raw_descriptor = _raw_descriptor_from_manifest(manifest_candidate)
+    descriptor_error: Exception | None = None
+    try:
+        raw_descriptor = _raw_descriptor_from_manifest(manifest_candidate)
+    except Exception as exc:
+        raw_descriptor = None
+        descriptor_error = exc
+        if manifest_candidate:
+            nested = manifest_candidate.metadata.get("depth")
+            target = nested if isinstance(nested, dict) else manifest_candidate.metadata
+            for key in ("raw_descriptor", "shape", "dtype", "endianness"):
+                target.pop(key, None)
     if raw_descriptor and depth_path.suffix.lower() in {".raw", ".bin"}:
         if linked:
             candidates["depth"] = ProbeCandidate(
@@ -312,6 +322,17 @@ def seed_import_from_paths(
                 staged["depth"],
             )
     session = ImportSession(import_id, staged, candidates, manifest_candidate)
+    if descriptor_error is not None:
+        session.diagnostics.append(
+            Diagnostic(
+                code="MANIFEST_SCHEMA_INVALID",
+                severity="fatal",
+                field="manifest.depth",
+                message="RAW/BIN descriptor is invalid.",
+                hint=str(descriptor_error),
+                capability="metric_pointcloud",
+            )
+        )
     if manifest_candidate:
         try:
             session.metadata = _metadata_from_manifest(manifest_candidate)

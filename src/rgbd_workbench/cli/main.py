@@ -171,7 +171,7 @@ def pack_workspace(
 ) -> None:
     """Pack a workspace into a validated ZIP64 archive."""
     root = workspace_root.resolve()
-    overrides: dict[str, bytes] = {}
+    overrides: dict[str, bytes | Path] = {}
     skipped: set[str] = set()
     materialized_total = 0
     for locator_path in root.rglob("private-locators.json"):
@@ -196,12 +196,11 @@ def pack_workspace(
                 raise typer.BadParameter("linked sources exceed archive size limits")
             target_name = f"linked-{role}-{linked_path.name}"
             target_relative = (scene_dir / "sources" / target_name).relative_to(root).as_posix()
-            linked_bytes = linked_path.read_bytes()
-            overrides[target_relative] = linked_bytes
+            overrides[target_relative] = linked_path
             if role in scene_payload:
                 scene_payload[role]["filename"] = target_name
-                scene_payload[role]["size_bytes"] = len(linked_bytes)
-                scene_payload[role]["sha256"] = hashlib.sha256(linked_bytes).hexdigest()
+                scene_payload[role]["size_bytes"] = linked_size
+                scene_payload[role]["sha256"] = _sha256_file(linked_path)
         overrides[scene_path.relative_to(root).as_posix()] = (
             json.dumps(scene_payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
         ).encode("utf-8")
@@ -220,7 +219,14 @@ def pack_workspace(
         if relative in overrides:
             continue
         members.append((relative, path))
-    virtual_members = [(relative, None, data) for relative, data in overrides.items()]
+    virtual_members = [
+        (
+            relative,
+            data if isinstance(data, Path) else None,
+            None if isinstance(data, Path) else data,
+        )
+        for relative, data in overrides.items()
+    ]
     archive_members: list[tuple[str, Path | None, bytes | None]] = [
         *[(relative, path, None) for relative, path in members],
         *virtual_members,
