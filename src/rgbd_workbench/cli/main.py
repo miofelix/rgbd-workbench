@@ -173,6 +173,7 @@ def pack_workspace(
     root = workspace_root.resolve()
     overrides: dict[str, bytes] = {}
     skipped: set[str] = set()
+    materialized_total = 0
     for locator_path in root.rglob("private-locators.json"):
         relative_locator = locator_path.relative_to(root).as_posix()
         skipped.add(relative_locator)
@@ -186,6 +187,13 @@ def pack_workspace(
             linked_path = Path(locator["path"])
             if not linked_path.is_file():
                 raise typer.BadParameter(f"linked source is missing: {role}")
+            linked_size = linked_path.stat().st_size
+            materialized_total += linked_size
+            if (
+                linked_size > MAX_ARCHIVE_MEMBER_BYTES
+                or materialized_total > MAX_ARCHIVE_TOTAL_BYTES
+            ):
+                raise typer.BadParameter("linked sources exceed archive size limits")
             target_name = f"linked-{role}-{linked_path.name}"
             target_relative = (scene_dir / "sources" / target_name).relative_to(root).as_posix()
             linked_bytes = linked_path.read_bytes()
@@ -276,7 +284,10 @@ def unpack_workspace(
                 raise typer.BadParameter("archive has too many members")
             if "archive_manifest.json" not in names:
                 raise typer.BadParameter("archive manifest is missing")
-            expected = json.loads(source.read("archive_manifest.json"))
+            manifest_info = source.getinfo("archive_manifest.json")
+            if manifest_info.file_size > 1024 * 1024:
+                raise typer.BadParameter("archive manifest exceeds size limits")
+            expected = json.loads(source.read(manifest_info))
             expected_members = {item["path"]: item for item in expected.get("members", [])}
             seen: set[str] = set()
             total_bytes = 0

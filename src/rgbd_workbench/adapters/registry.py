@@ -17,11 +17,17 @@ class AdapterRegistry:
     def default(cls) -> AdapterRegistry:
         return cls()
 
-    def probe(self, path: Path, role: Literal["rgb", "depth", "manifest"] | str) -> ProbeCandidate:
+    def probe(
+        self,
+        path: Path,
+        role: Literal["rgb", "depth", "manifest"] | str,
+        *,
+        raw_descriptor: dict[str, object] | None = None,
+    ) -> ProbeCandidate:
         if role == "rgb":
             return probe_rgb(path)
         if role == "depth":
-            return probe_depth(path)
+            return probe_depth(path, raw_descriptor=raw_descriptor)
         if role == "manifest":
             return probe_manifest(path)
         raise ValueError(f"unsupported source role: {role}")

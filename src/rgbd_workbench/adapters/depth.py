@@ -165,14 +165,27 @@ def _load_array(path: Path, metadata: dict[str, Any]) -> np.ndarray:
     raise ValueError("unsupported depth format")
 
 
-def probe_depth(path: Path) -> ProbeCandidate:
+def probe_depth(path: Path, raw_descriptor: dict[str, Any] | None = None) -> ProbeCandidate:
     path = path.expanduser().resolve(strict=True)
     if path.stat().st_size > MAX_FILE_BYTES:
         raise ValueError("depth file exceeds configured size limit")
     diagnostics: list[Diagnostic] = []
     metadata: dict[str, Any] = {"format": path.suffix.lower().lstrip(".")}
+    if raw_descriptor is not None:
+        metadata["raw_descriptor"] = raw_descriptor
     try:
         if path.suffix.lower() == ".raw" or path.suffix.lower() == ".bin":
+            if isinstance(raw_descriptor, dict):
+                value = _load_array(path, metadata)
+                metadata.update(_array_metadata(value))
+                source = _source(
+                    path,
+                    "depth",
+                    width=int(metadata["width"]),
+                    height=int(metadata["height"]),
+                    dtype=str(metadata["dtype"]),
+                )
+                return ProbeCandidate("depth", source, metadata, diagnostics, path)
             metadata.update({"shape": None, "dtype": None, "unit": None})
             diagnostics.append(
                 _fatal(

@@ -183,7 +183,10 @@ def test_scene_depth_preview_returns_png_for_array_source(tmp_path: Path):
         json={"representation": "z_depth", "unit": "mm"},
     )
     assert confirmed.status_code == 200
+    assert confirmed.json()["scene"]["capabilities"]["metric_pointcloud"] is False
     committed = test_client.post(f"/api/v1/imports/{import_id}/commit")
+    assert committed.status_code == 201
+    assert committed.json()["scene"]["capabilities"]["metric_pointcloud"] is False
     scene_id = committed.json()["scene"]["scene_id"]
 
     preview = test_client.get(f"/api/v1/scenes/{scene_id}/preview/depth")
@@ -271,10 +274,15 @@ def test_manifest_upload_supplies_semantics_and_commits(tmp_path: Path):
 def test_orientation_confirmation_does_not_override_geometry_gate(tmp_path: Path):
     test_client = client(tmp_path)
     test_client.cookies.set("rgbd_session", test_client.app.state.session_cookie)
+    rotated = io.BytesIO()
+    image = Image.new("RGB", (2, 2), (20, 40, 60))
+    exif = image.getexif()
+    exif[274] = 6
+    image.save(rotated, format="JPEG", exif=exif.tobytes())
     created = test_client.post(
         "/api/v1/imports",
         files={
-            "rgb": ("color.jpg", png_bytes(), "image/jpeg"),
+            "rgb": ("color.jpg", rotated.getvalue(), "image/jpeg"),
             "depth": ("depth.npy", depth_bytes(), "application/octet-stream"),
         },
     )
@@ -299,3 +307,7 @@ def test_orientation_confirmation_does_not_override_geometry_gate(tmp_path: Path
         },
     )
     assert confirmed.status_code == 200
+    assert confirmed.json()["scene"]["capabilities"]["metric_pointcloud"] is False
+    committed = test_client.post(f"/api/v1/imports/{import_id}/commit")
+    assert committed.status_code == 201
+    assert committed.json()["scene"]["capabilities"]["metric_pointcloud"] is False

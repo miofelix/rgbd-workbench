@@ -132,6 +132,7 @@ class SceneManifestV1(StrictModel):
     coordinate_convention: Literal["x_right_y_down_z_forward"] = "x_right_y_down_z_forward"
     normalizer_version: VersionString
     adapter_versions: dict[str, VersionString]
+    diagnostics: list[Diagnostic] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def source_roles_are_correct(self) -> SceneManifestV1:
@@ -198,10 +199,12 @@ def capability_report(
     manifest: SceneManifestV1,
     diagnostics: tuple[Diagnostic, ...] | list[Diagnostic],
 ) -> CapabilityReport:
+    all_diagnostics = [*manifest.diagnostics, *diagnostics]
+
     def blocked(capability: str) -> bool:
         return any(
             item.severity == "fatal" and item.capability in (None, capability)
-            for item in diagnostics
+            for item in all_diagnostics
         )
 
     base_geometry = _camera_geometry_valid(manifest)

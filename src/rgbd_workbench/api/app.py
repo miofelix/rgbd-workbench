@@ -82,7 +82,8 @@ def _scene_summary(
     scene: SceneManifestV1,
     diagnostics: list[Diagnostic] | tuple[Diagnostic, ...] = (),
 ) -> dict[str, Any]:
-    report = capability_report(scene, diagnostics)
+    effective_diagnostics = list(scene.diagnostics) + list(diagnostics)
+    report = capability_report(scene, effective_diagnostics)
     return {
         "schema_version": scene.schema_version,
         "scene_id": scene.scene_id,
@@ -97,7 +98,7 @@ def _scene_summary(
         "normalizer_version": scene.normalizer_version,
         "adapter_versions": scene.adapter_versions,
         "capabilities": report.model_dump(),
-        "diagnostics": _diagnostics(list(diagnostics)),
+        "diagnostics": _diagnostics(effective_diagnostics),
     }
 
 
@@ -142,6 +143,7 @@ def _build_scene(session: ImportSession) -> SceneManifestV1:
         alignment=metadata.alignment,
         normalizer_version="1",
         adapter_versions={"rgb": "1", "depth": "1"},
+        diagnostics=session.diagnostics,
     )
 
 
@@ -173,6 +175,15 @@ def _metadata_from_manifest(candidate: ProbeCandidate) -> MetadataUpdate:
     return MetadataUpdate.model_validate(
         {key: value for key, value in payload.items() if value is not None}
     )
+
+
+def _raw_descriptor_from_manifest(candidate: ProbeCandidate | None) -> dict[str, object] | None:
+    if candidate is None:
+        return None
+    nested = candidate.metadata.get("depth")
+    depth = nested if isinstance(nested, dict) else candidate.metadata
+    descriptor = depth.get("raw_descriptor") if isinstance(depth, dict) else None
+    return descriptor if isinstance(descriptor, dict) else None
 
 
 def _bind_staged_candidate(
@@ -238,13 +249,50 @@ def seed_import_from_paths(
                 registry.probe(staged_file.path, role), staged_file
             )
     manifest_candidate = probe_manifest(manifest_path) if manifest_path else None
+    raw_descriptor = _raw_descriptor_from_manifest(manifest_candidate)
+    if raw_descriptor and depth_path.suffix.lower() in {".raw", ".bin"}:
+        if linked:
+            candidates["depth"] = ProbeCandidate(
+                role="depth",
+                source=store.register_linked(depth_path, "depth"),
+                metadata=registry.probe(
+                    depth_path, "depth", raw_descriptor=raw_descriptor
+                ).metadata,
+                diagnostics=registry.probe(
+                    depth_path, "depth", raw_descriptor=raw_descriptor
+                ).diagnostics,
+                path=depth_path,
+            )
+        else:
+            candidates["depth"] = _bind_staged_candidate(
+                registry.probe(
+                    staged["depth"].path,
+                    "depth",
+                    raw_descriptor=raw_descriptor,
+                ),
+                staged["depth"],
+            )
     session = ImportSession(import_id, staged, candidates, manifest_candidate)
     if manifest_candidate:
-        session.metadata = _metadata_from_manifest(manifest_candidate)
+        try:
+            session.metadata = _metadata_from_manifest(manifest_candidate)
+        except Exception as exc:
+            session.diagnostics.append(
+                Diagnostic(
+                    code="MANIFEST_SCHEMA_INVALID",
+                    severity="fatal",
+                    field="manifest",
+                    message="Manifest semantics are invalid.",
+                    hint=str(exc),
+                    capability="metric_pointcloud",
+                )
+            )
     session.scene = _build_scene(session)
-    session.diagnostics = [
+    session.diagnostics.extend(manifest_candidate.diagnostics if manifest_candidate else [])
+    session.diagnostics.extend(
         item for candidate in candidates.values() for item in candidate.diagnostics
-    ]
+    )
+    session.scene = session.scene.model_copy(update={"diagnostics": session.diagnostics})
     application.state.imports[import_id] = session
     return import_id
 
@@ -394,6 +442,16 @@ def create_app(
                 )
                 staged["manifest"] = staged_manifest
                 manifest_candidate = probe_manifest(staged_manifest.path)
+                raw_descriptor = _raw_descriptor_from_manifest(manifest_candidate)
+                if raw_descriptor and staged["depth"].path.suffix.lower() in {".raw", ".bin"}:
+                    candidates["depth"] = _bind_staged_candidate(
+                        registry.probe(
+                            staged["depth"].path,
+                            "depth",
+                            raw_descriptor=raw_descriptor,
+                        ),
+                        staged["depth"],
+                    )
             session = ImportSession(import_id, staged, candidates, manifest_candidate)
             if manifest_candidate is not None:
                 try:
@@ -416,6 +474,7 @@ def create_app(
             session.diagnostics.extend(
                 item for candidate in candidates.values() for item in candidate.diagnostics
             )
+            session.scene = session.scene.model_copy(update={"diagnostics": session.diagnostics})
             imports[import_id] = session
             report = capability_report(session.scene, session.diagnostics)
             return JSONResponse(
@@ -495,6 +554,7 @@ def create_app(
         session.diagnostics.extend(
             item for candidate in session.candidates.values() for item in candidate.diagnostics
         )
+        session.scene = session.scene.model_copy(update={"diagnostics": session.diagnostics})
         report = capability_report(session.scene, session.diagnostics)
         return JSONResponse(
             content={
