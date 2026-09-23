@@ -1,18 +1,44 @@
 #!/usr/bin/env python3
-"""Check generated JSON schemas once the domain models are available."""
+"""Generate or check the tracked JSON Schemas for public domain models."""
 
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
+from typing import Any
+
+from rgbd_workbench.domain.contracts import SceneManifestV1
+from rgbd_workbench.domain.diagnostics import Diagnostic
+
+SCHEMAS: dict[str, Any] = {
+    "scene-manifest-v1.json": SceneManifestV1.model_json_schema(),
+    "diagnostic-v1.json": Diagnostic.model_json_schema(),
+}
+
+
+def schema_bytes(schema: Any) -> bytes:
+    return (json.dumps(schema, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--write", action="store_true")
-    parser.parse_args()
+    args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    (root / "schemas").mkdir(exist_ok=True)
+    schema_dir = root / "schemas"
+    if args.write:
+        schema_dir.mkdir(exist_ok=True)
+    errors: list[str] = []
+    for name, schema in SCHEMAS.items():
+        path = schema_dir / name
+        expected = schema_bytes(schema)
+        if args.write:
+            path.write_bytes(expected)
+        elif not path.is_file() or path.read_bytes() != expected:
+            errors.append(name)
+    if errors:
+        parser.error("generated schemas are out of date: " + ", ".join(errors))
     return 0
 
 

@@ -1,0 +1,391 @@
+{
+  "$defs": {
+    "AlignmentSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Method"
+        },
+        "state": {
+          "enum": [
+            "registered_to_rgb",
+            "unregistered",
+            "unknown"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "AlignmentSpec",
+      "type": "object"
+    },
+    "CameraSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "cx": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cx"
+        },
+        "cy": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cy"
+        },
+        "distortion_model": {
+          "default": "unknown",
+          "enum": [
+            "none",
+            "unknown"
+          ],
+          "title": "Distortion Model",
+          "type": "string"
+        },
+        "fx": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fx"
+        },
+        "fy": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fy"
+        },
+        "height": {
+          "exclusiveMinimum": 0,
+          "maximum": 32768,
+          "title": "Height",
+          "type": "integer"
+        },
+        "model": {
+          "const": "pinhole",
+          "title": "Model",
+          "type": "string"
+        },
+        "width": {
+          "exclusiveMinimum": 0,
+          "maximum": 32768,
+          "title": "Width",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "model",
+        "width",
+        "height"
+      ],
+      "title": "CameraSpec",
+      "type": "object"
+    },
+    "DepthSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "invalid_values": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Invalid Values",
+          "type": "array"
+        },
+        "representation": {
+          "enum": [
+            "z_depth",
+            "relative_z",
+            "euclidean_range",
+            "inverse_depth",
+            "disparity"
+          ],
+          "title": "Representation",
+          "type": "string"
+        },
+        "scale_to_meter": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scale To Meter"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "enum": [
+                "m",
+                "mm",
+                "unitless"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "valid_max": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid Max"
+        },
+        "valid_min": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid Min"
+        }
+      },
+      "required": [
+        "representation"
+      ],
+      "title": "DepthSpec",
+      "type": "object"
+    },
+    "SourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "dtype": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dtype"
+        },
+        "filename": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Filename",
+          "type": "string"
+        },
+        "height": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Height"
+        },
+        "role": {
+          "enum": [
+            "rgb",
+            "depth",
+            "manifest"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        },
+        "source_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Source Id",
+          "type": "string"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width"
+        }
+      },
+      "required": [
+        "role",
+        "source_id",
+        "filename",
+        "sha256",
+        "size_bytes"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "adapter_versions": {
+      "additionalProperties": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Adapter Versions",
+      "type": "object"
+    },
+    "alignment": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AlignmentSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "camera": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CameraSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "coordinate_convention": {
+      "const": "x_right_y_down_z_forward",
+      "default": "x_right_y_down_z_forward",
+      "title": "Coordinate Convention",
+      "type": "string"
+    },
+    "depth": {
+      "$ref": "#/$defs/SourceRef"
+    },
+    "depth_spec": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DepthSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "display_name": {
+      "maxLength": 255,
+      "minLength": 1,
+      "title": "Display Name",
+      "type": "string"
+    },
+    "frame_id": {
+      "default": "camera",
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Frame Id",
+      "type": "string"
+    },
+    "normalizer_version": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Normalizer Version",
+      "type": "string"
+    },
+    "rgb": {
+      "$ref": "#/$defs/SourceRef"
+    },
+    "scene_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Scene Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema_version",
+    "scene_id",
+    "display_name",
+    "rgb",
+    "depth",
+    "normalizer_version",
+    "adapter_versions"
+  ],
+  "title": "SceneManifestV1",
+  "type": "object"
+}
