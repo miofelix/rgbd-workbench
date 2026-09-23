@@ -26,6 +26,7 @@ from rgbd_workbench.api.schemas import (
 )
 from rgbd_workbench.domain.contracts import (
     DepthSpec,
+    RawDepthDescriptor,
     SceneManifestV1,
     SourceRef,
     capability_report,
@@ -132,6 +133,28 @@ def _build_scene(session: ImportSession) -> SceneManifestV1:
         raise ValueError("representation is required when depth semantics are supplied")
     rgb = session.candidates["rgb"].source
     depth = session.candidates["depth"].source
+    raw_descriptor = _raw_descriptor_from_manifest(session.manifest_candidate)
+    if session.manifest_candidate is not None:
+        manifest_depth = session.manifest_candidate.metadata.get("depth")
+        manifest_shape = (
+            manifest_depth.get("shape")
+            if isinstance(manifest_depth, dict)
+            else session.manifest_candidate.metadata.get("shape")
+        )
+        source = session.candidates["depth"].source
+        if (
+            isinstance(manifest_shape, (list, tuple))
+            and len(manifest_shape) == 2
+            and source.width is not None
+            and source.height is not None
+            and tuple(manifest_shape) != (source.height, source.width)
+        ):
+            raise ValueError("manifest depth shape does not match the source array")
+    if raw_descriptor is not None:
+        source = session.candidates["depth"].source
+        if source.width is not None and source.height is not None:
+            if tuple(raw_descriptor.shape) != (source.height, source.width):
+                raise ValueError("manifest depth shape does not match the source array")
     return SceneManifestV1(
         schema_version=1,
         scene_id=f"scene-{session.import_id}",
@@ -144,6 +167,7 @@ def _build_scene(session: ImportSession) -> SceneManifestV1:
         normalizer_version="1",
         adapter_versions={"rgb": "1", "depth": "1"},
         diagnostics=session.diagnostics,
+        raw_descriptor=raw_descriptor,
     )
 
 
@@ -151,8 +175,10 @@ def _metadata_from_manifest(candidate: ProbeCandidate) -> MetadataUpdate:
     document = candidate.metadata
     nested_depth = document.get("depth")
     depth: dict[str, Any] = nested_depth if isinstance(nested_depth, dict) else document
-    representation = depth.get("representation") or depth.get("type")
-    unit = depth.get("unit")
+    representation = (
+        depth.get("representation") or depth.get("type") or document.get("representation")
+    )
+    unit = depth.get("unit") or document.get("unit")
     alignment_value = document.get("alignment")
     if isinstance(alignment_value, str):
         alignment = {"state": alignment_value}
@@ -165,10 +191,10 @@ def _metadata_from_manifest(candidate: ProbeCandidate) -> MetadataUpdate:
         "display_name": document.get("display_name"),
         "representation": representation,
         "unit": unit,
-        "scale_to_meter": depth.get("scale_to_meter"),
-        "invalid_values": depth.get("invalid_values", []),
-        "valid_min": depth.get("valid_min"),
-        "valid_max": depth.get("valid_max"),
+        "scale_to_meter": depth.get("scale_to_meter", document.get("scale_to_meter")),
+        "invalid_values": depth.get("invalid_values", document.get("invalid_values", [])),
+        "valid_min": depth.get("valid_min", document.get("valid_min")),
+        "valid_max": depth.get("valid_max", document.get("valid_max")),
         "camera": camera,
         "alignment": alignment,
     }
@@ -177,13 +203,22 @@ def _metadata_from_manifest(candidate: ProbeCandidate) -> MetadataUpdate:
     )
 
 
-def _raw_descriptor_from_manifest(candidate: ProbeCandidate | None) -> dict[str, object] | None:
+def _raw_descriptor_from_manifest(candidate: ProbeCandidate | None) -> RawDepthDescriptor | None:
     if candidate is None:
         return None
     nested = candidate.metadata.get("depth")
     depth = nested if isinstance(nested, dict) else candidate.metadata
     descriptor = depth.get("raw_descriptor") if isinstance(depth, dict) else None
-    return descriptor if isinstance(descriptor, dict) else None
+    if descriptor is None and isinstance(depth, dict):
+        if all(key in depth for key in ("shape", "dtype", "endianness")):
+            descriptor = {
+                "shape": depth["shape"],
+                "dtype": depth["dtype"],
+                "endianness": depth["endianness"],
+            }
+    if not isinstance(descriptor, dict):
+        return None
+    return RawDepthDescriptor.model_validate(descriptor)
 
 
 def _bind_staged_candidate(
@@ -256,10 +291,14 @@ def seed_import_from_paths(
                 role="depth",
                 source=store.register_linked(depth_path, "depth"),
                 metadata=registry.probe(
-                    depth_path, "depth", raw_descriptor=raw_descriptor
+                    depth_path,
+                    "depth",
+                    raw_descriptor=raw_descriptor.model_dump(),
                 ).metadata,
                 diagnostics=registry.probe(
-                    depth_path, "depth", raw_descriptor=raw_descriptor
+                    depth_path,
+                    "depth",
+                    raw_descriptor=raw_descriptor.model_dump(),
                 ).diagnostics,
                 path=depth_path,
             )
@@ -268,7 +307,7 @@ def seed_import_from_paths(
                 registry.probe(
                     staged["depth"].path,
                     "depth",
-                    raw_descriptor=raw_descriptor,
+                    raw_descriptor=raw_descriptor.model_dump(),
                 ),
                 staged["depth"],
             )
@@ -394,7 +433,13 @@ def create_app(
             media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
             return FileResponse(path, media_type=media_type)
         try:
-            candidate = registry.probe(path, "depth")
+            candidate = registry.probe(
+                path,
+                "depth",
+                raw_descriptor=(
+                    scene.raw_descriptor.model_dump() if scene.raw_descriptor else None
+                ),
+            )
             raw = (
                 registry.normalize(candidate, scene).values
                 if scene.depth_spec
@@ -448,7 +493,7 @@ def create_app(
                         registry.probe(
                             staged["depth"].path,
                             "depth",
-                            raw_descriptor=raw_descriptor,
+                            raw_descriptor=raw_descriptor.model_dump(),
                         ),
                         staged["depth"],
                     )
@@ -535,6 +580,7 @@ def create_app(
         try:
             session.scene = _build_scene(session)
         except ValueError as exc:
+            session.scene = None
             diagnostic = Diagnostic(
                 code="METADATA_INVALID",
                 severity="fatal",
@@ -584,6 +630,16 @@ def create_app(
         session = imports.get(import_id)
         if session is None or session.scene is None:
             raise HTTPException(status_code=404, detail="import not found")
+        blocking_codes = {
+            "METADATA_INVALID",
+            "MANIFEST_SCHEMA_INVALID",
+            "MANIFEST_INVALID",
+            "MANIFEST_SCHEMA_UNSUPPORTED",
+        }
+        if any(
+            item.severity == "fatal" and item.code in blocking_codes for item in session.diagnostics
+        ):
+            raise HTTPException(status_code=422, detail="import has invalid metadata")
         try:
             managed_sources = {
                 role: staged for role, staged in session.staged.items() if role in {"rgb", "depth"}

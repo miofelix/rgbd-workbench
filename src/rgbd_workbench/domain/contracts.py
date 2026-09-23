@@ -117,6 +117,18 @@ class KNNSmoothSpec(StrictModel):
     k: StrictInt = Field(default=16, ge=1, le=64)
 
 
+class RawDepthDescriptor(StrictModel):
+    shape: list[StrictInt]
+    dtype: Annotated[str, StringConstraints(min_length=1, max_length=64, strict=True)]
+    endianness: Literal["little", "big", "native"]
+
+    @model_validator(mode="after")
+    def validate_shape(self) -> RawDepthDescriptor:
+        if len(self.shape) != 2 or any(item <= 0 for item in self.shape):
+            raise ValueError("RAW shape must contain positive dimensions")
+        return self
+
+
 class SceneManifestV1(StrictModel):
     schema_version: Literal[1]
     scene_id: Annotated[str, StringConstraints(min_length=1, max_length=128, strict=True)]
@@ -133,6 +145,7 @@ class SceneManifestV1(StrictModel):
     normalizer_version: VersionString
     adapter_versions: dict[str, VersionString]
     diagnostics: list[Diagnostic] = Field(default_factory=list)
+    raw_descriptor: RawDepthDescriptor | None = None
 
     @model_validator(mode="after")
     def source_roles_are_correct(self) -> SceneManifestV1:

@@ -154,7 +154,13 @@ def _load_array(path: Path, metadata: dict[str, Any]) -> np.ndarray:
         descriptor = metadata.get("raw_descriptor")
         if not isinstance(descriptor, dict):
             raise ValueError("RAW descriptor is required")
-        dtype = np.dtype(str(descriptor["dtype"]))
+        dtype_name = str(descriptor["dtype"])
+        endianness = descriptor.get("endianness", "native")
+        dtype = np.dtype(dtype_name)
+        if endianness == "little":
+            dtype = dtype.newbyteorder("<")
+        elif endianness == "big":
+            dtype = dtype.newbyteorder(">")
         shape = tuple(int(item) for item in descriptor["shape"])
         if len(shape) != 2:
             raise ValueError("RAW shape must be two-dimensional")

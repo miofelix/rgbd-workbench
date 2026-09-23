@@ -311,3 +311,60 @@ def test_orientation_confirmation_does_not_override_geometry_gate(tmp_path: Path
     committed = test_client.post(f"/api/v1/imports/{import_id}/commit")
     assert committed.status_code == 201
     assert committed.json()["scene"]["capabilities"]["metric_pointcloud"] is False
+
+
+def test_invalid_confirmation_cannot_commit_previous_scene(tmp_path: Path):
+    test_client = client(tmp_path)
+    test_client.cookies.set("rgbd_session", test_client.app.state.session_cookie)
+    created = test_client.post(
+        "/api/v1/imports",
+        files={
+            "rgb": ("color.png", png_bytes(), "image/png"),
+            "depth": ("depth.npy", depth_bytes(), "application/octet-stream"),
+        },
+    )
+    import_id = created.json()["import_id"]
+    valid = test_client.put(
+        f"/api/v1/imports/{import_id}/metadata",
+        json={"representation": "z_depth", "unit": "mm"},
+    )
+    assert valid.status_code == 200
+    invalid = test_client.put(
+        f"/api/v1/imports/{import_id}/metadata",
+        json={"representation": "z_depth", "unit": "unitless"},
+    )
+    assert invalid.status_code == 422
+    commit = test_client.post(f"/api/v1/imports/{import_id}/commit")
+    assert commit.status_code in {404, 422}
+
+
+def test_manifest_described_raw_depth_commits_and_previews(tmp_path: Path):
+    test_client = client(tmp_path)
+    test_client.cookies.set("rgbd_session", test_client.app.state.session_cookie)
+    raw = np.array([[1000, 1200], [1400, 1600]], dtype="<u2").tobytes()
+    manifest = json.dumps(
+        {
+            "schema_version": 1,
+            "representation": "z_depth",
+            "unit": "mm",
+            "depth": {
+                "shape": [2, 2],
+                "dtype": "u2",
+                "endianness": "little",
+            },
+        }
+    ).encode()
+    created = test_client.post(
+        "/api/v1/imports",
+        files={
+            "rgb": ("color.png", png_bytes(), "image/png"),
+            "depth": ("depth.raw", raw, "application/octet-stream"),
+            "manifest": ("scene.json", manifest, "application/json"),
+        },
+    )
+    assert created.status_code == 201, created.text
+    committed = test_client.post(f"/api/v1/imports/{created.json()['import_id']}/commit")
+    assert committed.status_code == 201, committed.text
+    scene_id = committed.json()["scene"]["scene_id"]
+    preview = test_client.get(f"/api/v1/scenes/{scene_id}/preview/depth")
+    assert preview.status_code == 200

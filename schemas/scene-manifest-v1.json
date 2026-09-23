@@ -272,6 +272,40 @@
       "title": "Diagnostic",
       "type": "object"
     },
+    "RawDepthDescriptor": {
+      "additionalProperties": false,
+      "properties": {
+        "dtype": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Dtype",
+          "type": "string"
+        },
+        "endianness": {
+          "enum": [
+            "little",
+            "big",
+            "native"
+          ],
+          "title": "Endianness",
+          "type": "string"
+        },
+        "shape": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Shape",
+          "type": "array"
+        }
+      },
+      "required": [
+        "shape",
+        "dtype",
+        "endianness"
+      ],
+      "title": "RawDepthDescriptor",
+      "type": "object"
+    },
     "SourceRef": {
       "additionalProperties": false,
       "properties": {
@@ -436,6 +470,17 @@
       "minLength": 1,
       "title": "Normalizer Version",
       "type": "string"
+    },
+    "raw_descriptor": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RawDepthDescriptor"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "rgb": {
       "$ref": "#/$defs/SourceRef"
