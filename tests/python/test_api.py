@@ -266,3 +266,36 @@ def test_manifest_upload_supplies_semantics_and_commits(tmp_path: Path):
     committed = test_client.post(f"/api/v1/imports/{import_id}/commit")
     assert committed.status_code == 201
     assert committed.json()["scene"]["depth_spec"]["unit"] == "mm"
+
+
+def test_orientation_confirmation_does_not_override_geometry_gate(tmp_path: Path):
+    test_client = client(tmp_path)
+    test_client.cookies.set("rgbd_session", test_client.app.state.session_cookie)
+    created = test_client.post(
+        "/api/v1/imports",
+        files={
+            "rgb": ("color.jpg", png_bytes(), "image/jpeg"),
+            "depth": ("depth.npy", depth_bytes(), "application/octet-stream"),
+        },
+    )
+    import_id = created.json()["import_id"]
+    confirmed = test_client.put(
+        f"/api/v1/imports/{import_id}/metadata",
+        json={
+            "representation": "z_depth",
+            "unit": "mm",
+            "orientation_confirmed": True,
+            "camera": {
+                "model": "pinhole",
+                "width": 2,
+                "height": 2,
+                "fx": 10.0,
+                "fy": 10.0,
+                "cx": 1.0,
+                "cy": 1.0,
+                "distortion_model": "none",
+            },
+            "alignment": {"state": "registered_to_rgb"},
+        },
+    )
+    assert confirmed.status_code == 200

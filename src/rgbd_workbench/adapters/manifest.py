@@ -47,11 +47,21 @@ def load_manifest_document(path: Path, *, max_bytes: int = DEFAULT_MAX_BYTES) ->
             raise ValueError("manifest format is unsupported")
     except yaml.YAMLError as exc:
         raise ValueError("manifest YAML must use safe constructs") from exc
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, MemoryError) as exc:
         raise ValueError("manifest document is invalid") from exc
+    if isinstance(value, dict) and value.get("schema_version") not in (None, 1):
+        raise ValueError("unsupported manifest schema version")
     _validate_structure(value)
     if not isinstance(value, dict):
         raise ValueError("manifest root must be an object")
+    depth = value.get("depth") if isinstance(value.get("depth"), dict) else value
+    shape = depth.get("shape") if isinstance(depth, dict) else None
+    if shape is not None and (
+        not isinstance(shape, (list, tuple))
+        or len(shape) != 2
+        or any(not isinstance(item, int) or item <= 0 for item in shape)
+    ):
+        raise ValueError("manifest depth shape must contain two positive integers")
     return value
 
 

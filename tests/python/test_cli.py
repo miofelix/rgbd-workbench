@@ -100,6 +100,31 @@ def test_workspace_unpack_rejects_tampered_member(tmp_path: Path):
     assert result.exit_code != 0
 
 
+def test_workspace_unpack_rejects_extreme_compression_ratio(tmp_path: Path):
+    archive = tmp_path / "ratio.rgbdw"
+    payload = b"a" * (2 * 1024 * 1024)
+    import hashlib
+
+    manifest = {
+        "schema_version": 1,
+        "members": [
+            {
+                "path": "large.txt",
+                "size": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        ],
+    }
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:
+        output.writestr("large.txt", payload)
+        output.writestr("archive_manifest.json", json.dumps(manifest))
+    result = CliRunner().invoke(
+        app,
+        ["workspace", "unpack", str(archive), "--output", str(tmp_path / "restored")],
+    )
+    assert result.exit_code != 0
+
+
 def test_cli_seeded_import_is_recoverable_by_browser_session(tmp_path: Path):
     rgb = tmp_path / "rgb.png"
     depth = tmp_path / "depth.npy"

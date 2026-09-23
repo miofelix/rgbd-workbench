@@ -27,8 +27,15 @@ def _validate_npy_stream(stream: Any) -> None:
         raise ValueError("DEPTH_DECODE_FAILED: unsupported NPY version")
     if dtype.hasobject:
         raise ValueError("DEPTH_OBJECT_DTYPE: NPY object dtype is not allowed")
-    elements = int(np.prod(shape, dtype=np.int64))
-    if len(shape) != 2 or elements > MAX_PIXELS or elements * dtype.itemsize > MAX_ARRAY_BYTES:
+    if len(shape) != 2 or any(int(dimension) <= 0 for dimension in shape):
+        raise ValueError("DEPTH_SIZE_LIMIT: NPY shape must be a positive two-dimensional shape")
+    elements = 1
+    for dimension in shape:
+        dimension_value = int(dimension)
+        if elements > MAX_PIXELS // dimension_value:
+            raise ValueError("DEPTH_SIZE_LIMIT: NPY declared array exceeds configured limits")
+        elements *= dimension_value
+    if elements * dtype.itemsize > MAX_ARRAY_BYTES:
         raise ValueError("DEPTH_SIZE_LIMIT: NPY declared array exceeds configured limits")
 
 

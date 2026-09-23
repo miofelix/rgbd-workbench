@@ -8,9 +8,10 @@ interface ImportWizardProps {
   onCommitted: (scene: SceneSummary) => void;
   onProbed?: (probe: ProbeResponse) => void;
   initialImportId?: string;
+  activeSceneId?: string | null;
 }
 
-export function ImportWizard({ onCommitted, onProbed, initialImportId }: ImportWizardProps): React.JSX.Element {
+export function ImportWizard({ onCommitted, onProbed, initialImportId, activeSceneId }: ImportWizardProps): React.JSX.Element {
   const [rgb, setRgb] = useState<File | null>(null);
   const [depth, setDepth] = useState<File | null>(null);
   const [manifest, setManifest] = useState<File | undefined>();
@@ -28,6 +29,12 @@ export function ImportWizard({ onCommitted, onProbed, initialImportId }: ImportW
     revision.current += 1;
     return { controller, requestRevision: revision.current };
   };
+
+  useEffect(() => {
+    if (activeSceneId === undefined) return;
+    request.current?.abort();
+    revision.current += 1;
+  }, [activeSceneId]);
 
   const runProbe = async (nextRgb: File | null, nextDepth: File | null): Promise<void> => {
     if (!nextRgb || !nextDepth) return;

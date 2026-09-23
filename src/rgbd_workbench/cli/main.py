@@ -27,6 +27,7 @@ app.add_typer(workspace_app, name="workspace")
 MAX_ARCHIVE_MEMBERS = 10_000
 MAX_ARCHIVE_TOTAL_BYTES = 4 * 1024 * 1024 * 1024
 MAX_ARCHIVE_MEMBER_BYTES = 2 * 1024 * 1024 * 1024
+MAX_ARCHIVE_COMPRESSION_RATIO = 1000
 
 
 def default_config_path() -> Path:
@@ -187,9 +188,12 @@ def pack_workspace(
                 raise typer.BadParameter(f"linked source is missing: {role}")
             target_name = f"linked-{role}-{linked_path.name}"
             target_relative = (scene_dir / "sources" / target_name).relative_to(root).as_posix()
-            overrides[target_relative] = linked_path.read_bytes()
+            linked_bytes = linked_path.read_bytes()
+            overrides[target_relative] = linked_bytes
             if role in scene_payload:
                 scene_payload[role]["filename"] = target_name
+                scene_payload[role]["size_bytes"] = len(linked_bytes)
+                scene_payload[role]["sha256"] = hashlib.sha256(linked_bytes).hexdigest()
         overrides[scene_path.relative_to(root).as_posix()] = (
             json.dumps(scene_payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
         ).encode("utf-8")
@@ -291,6 +295,12 @@ def unpack_workspace(
                     raise typer.BadParameter("archive contains a directory or symlink member")
                 if info.file_size > MAX_ARCHIVE_MEMBER_BYTES:
                     raise typer.BadParameter("archive member exceeds size limits")
+                if (
+                    info.file_size > 1024 * 1024
+                    and info.compress_size > 0
+                    and info.file_size / info.compress_size > MAX_ARCHIVE_COMPRESSION_RATIO
+                ):
+                    raise typer.BadParameter("archive compression ratio is unsafe")
                 total_bytes += info.file_size
                 if total_bytes > MAX_ARCHIVE_TOTAL_BYTES:
                     raise typer.BadParameter("archive exceeds total size limits")

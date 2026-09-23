@@ -414,14 +414,7 @@ def create_app(
                 item for item in (manifest_candidate.diagnostics if manifest_candidate else [])
             )
             session.diagnostics.extend(
-                item
-                for candidate in candidates.values()
-                for item in candidate.diagnostics
-                if not (
-                    item.code == "RGB_ORIENTATION_CONFIRMATION_REQUIRED"
-                    and session.metadata
-                    and session.metadata.orientation_confirmed
-                )
+                item for candidate in candidates.values() for item in candidate.diagnostics
             )
             imports[import_id] = session
             report = capability_report(session.scene, session.diagnostics)
@@ -500,20 +493,14 @@ def create_app(
             session.manifest_candidate.diagnostics if session.manifest_candidate else []
         )
         session.diagnostics.extend(
-            item
-            for candidate in session.candidates.values()
-            for item in candidate.diagnostics
-            if not (
-                item.code == "RGB_ORIENTATION_CONFIRMATION_REQUIRED"
-                and payload.orientation_confirmed
-            )
+            item for candidate in session.candidates.values() for item in candidate.diagnostics
         )
         report = capability_report(session.scene, session.diagnostics)
         return JSONResponse(
             content={
                 "schema_version": 1,
                 "import_id": import_id,
-                "scene": _scene_summary(session.scene),
+                "scene": _scene_summary(session.scene, session.diagnostics),
                 "candidates": {
                     role: _candidate_summary(candidate)
                     for role, candidate in session.candidates.items()
@@ -549,7 +536,10 @@ def create_app(
         imports.pop(import_id, None)
         return JSONResponse(
             status_code=201,
-            content={"schema_version": 1, "scene": _scene_summary(scene)},
+            content={
+                "schema_version": 1,
+                "scene": _scene_summary(scene, store.revalidate_scene(scene.scene_id)),
+            },
         )
 
     @app.get("/", include_in_schema=False)

@@ -65,7 +65,7 @@ export function App(): React.JSX.Element {
           <div className="sidebar-footer"><span className="status-light" /> M1 · 输入与诊断</div>
         </aside>
         <main className="main-content">
-          <ImportWizard initialImportId={initialImportId} onProbed={setImportSession} onCommitted={(scene) => {
+          <ImportWizard initialImportId={initialImportId} activeSceneId={activeSceneId} onProbed={setImportSession} onCommitted={(scene) => {
             selectScene(scene);
             void loadScenes();
           }} />

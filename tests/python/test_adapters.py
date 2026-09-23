@@ -130,6 +130,18 @@ def test_numpy_header_size_is_rejected_before_array_materialization(tmp_path: Pa
     assert any(item.code == "DEPTH_SIZE_LIMIT" for item in candidate.diagnostics)
 
 
+def test_numpy_dimension_product_overflow_is_rejected(tmp_path: Path):
+    header = io.BytesIO()
+    np.lib.format.write_array_header_1_0(
+        header,
+        {"descr": np.dtype("<f4").str, "fortran_order": False, "shape": (2**62, 2**62)},
+    )
+    path = tmp_path / "overflow.npy"
+    path.write_bytes(header.getvalue())
+    candidate = AdapterRegistry.default().probe(path, "depth")
+    assert any(item.code == "DEPTH_SIZE_LIMIT" for item in candidate.diagnostics)
+
+
 def test_npz_uncompressed_member_size_is_bounded(tmp_path: Path):
     path = tmp_path / "bomb.npz"
     header = io.BytesIO()
@@ -181,6 +193,11 @@ def test_manifest_loader_rejects_unsafe_yaml_and_oversized_document(tmp_path: Pa
     nested.write_text(json.dumps(value), encoding="utf-8")
     with pytest.raises(ValueError, match="depth"):
         load_manifest_document(nested)
+
+    unsupported = tmp_path / "unsupported.json"
+    unsupported.write_text(json.dumps({"schema_version": 999}), encoding="utf-8")
+    with pytest.raises(ValueError, match="schema version"):
+        load_manifest_document(unsupported)
 
 
 def test_registry_probes_manifest_role_without_exposing_path(tmp_path: Path):
