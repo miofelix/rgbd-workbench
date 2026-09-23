@@ -44,6 +44,18 @@ def test_business_routes_require_session_cookie(tmp_path: Path):
     assert response.json()["detail"] == "session required"
 
 
+def test_business_routes_reject_lookalike_host_and_origin(tmp_path: Path):
+    test_client = client(tmp_path)
+    test_client.cookies.set("rgbd_session", test_client.app.state.session_cookie)
+    host = test_client.get("/api/v1/scenes", headers={"host": "localhost.attacker.example"})
+    origin = test_client.get(
+        "/api/v1/scenes",
+        headers={"origin": "https://attacker.example/?from=127.0.0.1"},
+    )
+    assert host.status_code == 403
+    assert origin.status_code == 403
+
+
 def test_query_token_is_exchanged_for_cookie_and_removed_from_url(tmp_path: Path):
     app = create_app(tmp_path / "workspace", session_token="test-token")
     test_client = TestClient(app, raise_server_exceptions=False)
@@ -178,3 +190,79 @@ def test_scene_depth_preview_returns_png_for_array_source(tmp_path: Path):
     assert preview.status_code == 200
     assert preview.headers["content-type"].startswith("image/png")
     assert preview.content.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_linked_scene_staleness_is_reflected_in_api_capabilities(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    rgb_path = source_dir / "rgb.png"
+    depth_path = source_dir / "depth.npy"
+    rgb_path.write_bytes(png_bytes())
+    depth_path.write_bytes(depth_bytes())
+    application = create_app(tmp_path / "workspace")
+    store = application.state.workspace_store
+    rgb = store.register_linked(rgb_path, "rgb").model_copy(update={"width": 2, "height": 2})
+    depth = store.register_linked(depth_path, "depth").model_copy(update={"width": 2, "height": 2})
+    from rgbd_workbench.domain.contracts import (
+        AlignmentSpec,
+        CameraSpec,
+        DepthSpec,
+        SceneManifestV1,
+    )
+
+    manifest = SceneManifestV1(
+        schema_version=1,
+        scene_id="linked-scene",
+        display_name="Linked Scene",
+        rgb=rgb,
+        depth=depth,
+        depth_spec=DepthSpec(representation="z_depth", unit="mm"),
+        camera=CameraSpec(
+            model="pinhole",
+            width=2,
+            height=2,
+            fx=10.0,
+            fy=10.0,
+            cx=1.0,
+            cy=1.0,
+            distortion_model="none",
+        ),
+        alignment=AlignmentSpec(state="registered_to_rgb"),
+        normalizer_version="1",
+        adapter_versions={"rgb": "1", "depth": "1"},
+    )
+    store.commit_scene(manifest, {})
+    depth_path.write_bytes(b"changed")
+    test_client = TestClient(application)
+    test_client.cookies.set("rgbd_session", application.state.session_cookie)
+    response = test_client.get("/api/v1/scenes")
+    assert response.status_code == 200
+    linked = response.json()["scenes"][0]
+    assert linked["capabilities"]["metric_pointcloud"] is False
+    assert any(item["code"] == "LINKED_SOURCE_STALE" for item in linked["diagnostics"])
+
+
+def test_manifest_upload_supplies_semantics_and_commits(tmp_path: Path):
+    test_client = client(tmp_path)
+    test_client.cookies.set("rgbd_session", test_client.app.state.session_cookie)
+    manifest = json.dumps(
+        {
+            "schema_version": 1,
+            "representation": "z_depth",
+            "unit": "mm",
+            "alignment": {"state": "registered_to_rgb"},
+        }
+    ).encode()
+    created = test_client.post(
+        "/api/v1/imports",
+        files={
+            "rgb": ("color.png", png_bytes(), "image/png"),
+            "depth": ("depth.npy", depth_bytes(), "application/octet-stream"),
+            "manifest": ("scene.json", manifest, "application/json"),
+        },
+    )
+    assert created.status_code == 201
+    import_id = created.json()["import_id"]
+    committed = test_client.post(f"/api/v1/imports/{import_id}/commit")
+    assert committed.status_code == 201
+    assert committed.json()["scene"]["depth_spec"]["unit"] == "mm"

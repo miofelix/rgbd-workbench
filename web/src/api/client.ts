@@ -41,6 +41,10 @@ export function confirmImport(
   });
 }
 
+export function getImport(importId: string, signal?: AbortSignal): Promise<ConfirmedImport> {
+  return request<ConfirmedImport>(`/api/v1/imports/${encodeURIComponent(importId)}`, { signal });
+}
+
 export function commitImport(importId: string, signal?: AbortSignal): Promise<{ schema_version: 1; scene: SceneSummary }> {
   return request<{ schema_version: 1; scene: SceneSummary }>(`/api/v1/imports/${encodeURIComponent(importId)}/commit`, {
     method: "POST",

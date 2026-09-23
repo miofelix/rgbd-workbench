@@ -18,12 +18,15 @@ import uvicorn
 from platformdirs import user_config_dir
 
 from rgbd_workbench import APP_VERSION
-from rgbd_workbench.api.app import create_app
-from rgbd_workbench.workspace.store import WorkspaceStore
+from rgbd_workbench.api.app import create_app, seed_import_from_paths
 
 app = typer.Typer(help="RGB-D Lab local analysis workbench.")
 workspace_app = typer.Typer(help="Create and restore portable workspaces.")
 app.add_typer(workspace_app, name="workspace")
+
+MAX_ARCHIVE_MEMBERS = 10_000
+MAX_ARCHIVE_TOTAL_BYTES = 4 * 1024 * 1024 * 1024
+MAX_ARCHIVE_MEMBER_BYTES = 2 * 1024 * 1024 * 1024
 
 
 def default_config_path() -> Path:
@@ -69,6 +72,14 @@ def _open_browser(url: str) -> None:
     webbrowser.open(url)
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 @app.command()
 def serve(
     workspace_root: Path | None = typer.Option(None, "--workspace-root"),
@@ -96,37 +107,25 @@ def open(
 ) -> None:
     """Stage an RGB/depth pair and open the local workbench."""
     root = resolve_workspace_root(workspace_root)
-    store = WorkspaceStore(root)
-    store.initialize()
-    if link:
-        rgb_source_id = store.register_linked(rgb, "rgb").source_id
-        depth_source_id = store.register_linked(depth, "depth").source_id
-        mode = "linked"
-    else:
-        with rgb.open("rb") as stream:
-            staged_rgb = store.stage_bytes(rgb.name, stream, 2 * 1024 * 1024 * 1024)
-        with depth.open("rb") as stream:
-            staged_depth = store.stage_bytes(depth.name, stream, 2 * 1024 * 1024 * 1024)
-        rgb_source_id = staged_rgb.source_id
-        depth_source_id = staged_depth.source_id
-        mode = "managed"
+    application = create_app(
+        root,
+        session_token=os.environ.get("RGBD_WORKBENCH_SESSION_TOKEN"),
+    )
+    import_id = seed_import_from_paths(application, rgb, depth, manifest, linked=link)
+    url = f"http://127.0.0.1:8765/?token={application.state.session_token}&import={import_id}"
     typer.echo(
         json.dumps(
             {
                 "schema_version": 1,
-                "mode": mode,
-                "rgb_source_id": rgb_source_id,
-                "depth_source_id": depth_source_id,
-                "manifest_provided": manifest is not None,
-            },
-            sort_keys=True,
+                "import_id": import_id,
+                "mode": "linked" if link else "managed",
+            }
         )
     )
     if not no_open:
-        application = create_app(root)
-        url = f"http://127.0.0.1:8765/?token={application.state.session_token}"
         _open_browser(url)
-        typer.echo(url)
+    typer.echo(url)
+    uvicorn.run(application, host="127.0.0.1", port=8765, log_level="info")
 
 
 @app.command()
@@ -171,16 +170,51 @@ def pack_workspace(
 ) -> None:
     """Pack a workspace into a validated ZIP64 archive."""
     root = workspace_root.resolve()
+    overrides: dict[str, bytes] = {}
+    skipped: set[str] = set()
+    for locator_path in root.rglob("private-locators.json"):
+        relative_locator = locator_path.relative_to(root).as_posix()
+        skipped.add(relative_locator)
+        if not include_linked:
+            continue
+        scene_dir = locator_path.parent
+        scene_path = scene_dir / "scene.json"
+        locators = json.loads(locator_path.read_text(encoding="utf-8"))
+        scene_payload = json.loads(scene_path.read_text(encoding="utf-8"))
+        for role, locator in locators.items():
+            linked_path = Path(locator["path"])
+            if not linked_path.is_file():
+                raise typer.BadParameter(f"linked source is missing: {role}")
+            target_name = f"linked-{role}-{linked_path.name}"
+            target_relative = (scene_dir / "sources" / target_name).relative_to(root).as_posix()
+            overrides[target_relative] = linked_path.read_bytes()
+            if role in scene_payload:
+                scene_payload[role]["filename"] = target_name
+        overrides[scene_path.relative_to(root).as_posix()] = (
+            json.dumps(scene_payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+        ).encode("utf-8")
     members: list[tuple[str, Path]] = []
+    output_resolved = output.resolve()
     for path in sorted(root.rglob("*")):
         if not path.is_file() or path.is_symlink():
+            continue
+        if path.resolve() == output_resolved:
             continue
         relative = path.relative_to(root).as_posix()
         if relative.startswith(".staging/"):
             continue
-        if "private-locators.json" in relative and not include_linked:
+        if relative in skipped or "private-locators.json" in relative:
+            continue
+        if relative in overrides:
             continue
         members.append((relative, path))
+    virtual_members = [(relative, None, data) for relative, data in overrides.items()]
+    archive_members: list[tuple[str, Path | None, bytes | None]] = [
+        *[(relative, path, None) for relative, path in members],
+        *virtual_members,
+    ]
+    if len(archive_members) > MAX_ARCHIVE_MEMBERS:
+        raise typer.BadParameter("workspace has too many archive members")
     manifest: dict[str, Any] = {"schema_version": 1, "members": []}
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_name(f".{output.name}.tmp")
@@ -191,14 +225,23 @@ def pack_workspace(
             compression=zipfile.ZIP_DEFLATED,
             allowZip64=True,
         ) as archive:
-            for relative, path in members:
-                data = path.read_bytes()
-                archive.writestr(relative, data)
+            total_bytes = 0
+            for relative, member_path, data in archive_members:
+                size = member_path.stat().st_size if member_path is not None else len(data or b"")
+                if size > MAX_ARCHIVE_MEMBER_BYTES or total_bytes + size > MAX_ARCHIVE_TOTAL_BYTES:
+                    raise typer.BadParameter("workspace exceeds archive size limits")
+                if member_path is not None:
+                    archive.write(member_path, arcname=relative)
+                    digest = _sha256_file(member_path)
+                else:
+                    archive.writestr(relative, data or b"")
+                    digest = hashlib.sha256(data or b"").hexdigest()
+                total_bytes += size
                 manifest["members"].append(
                     {
                         "path": relative,
-                        "size": len(data),
-                        "sha256": hashlib.sha256(data).hexdigest(),
+                        "size": size,
+                        "sha256": digest,
                     }
                 )
             archive.writestr(
@@ -225,12 +268,49 @@ def unpack_workspace(
     try:
         with zipfile.ZipFile(archive) as source:
             names = source.namelist()
-            for name in names:
+            if len(names) > MAX_ARCHIVE_MEMBERS:
+                raise typer.BadParameter("archive has too many members")
+            if "archive_manifest.json" not in names:
+                raise typer.BadParameter("archive manifest is missing")
+            expected = json.loads(source.read("archive_manifest.json"))
+            expected_members = {item["path"]: item for item in expected.get("members", [])}
+            seen: set[str] = set()
+            total_bytes = 0
+            for info in source.infolist():
+                name = info.filename
+                if name == "archive_manifest.json":
+                    continue
+                normalized = Path(name).as_posix()
+                if (
+                    normalized in seen
+                    or normalized.startswith("/")
+                    or ".." in Path(normalized).parts
+                ):
+                    raise typer.BadParameter("archive contains an unsafe or duplicate path")
+                if info.is_dir() or (info.external_attr >> 16) & 0o170000 == 0o120000:
+                    raise typer.BadParameter("archive contains a directory or symlink member")
+                if info.file_size > MAX_ARCHIVE_MEMBER_BYTES:
+                    raise typer.BadParameter("archive member exceeds size limits")
+                total_bytes += info.file_size
+                if total_bytes > MAX_ARCHIVE_TOTAL_BYTES:
+                    raise typer.BadParameter("archive exceeds total size limits")
+                seen.add(normalized)
                 target = (temporary / name).resolve()
                 if not target.is_relative_to(temporary) or name.endswith("/"):
                     raise typer.BadParameter("archive contains an unsafe path")
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(source.read(name))
+                digest = hashlib.sha256()
+                with source.open(info) as input_stream, target.open("wb") as output_stream:
+                    while chunk := input_stream.read(1024 * 1024):
+                        digest.update(chunk)
+                        output_stream.write(chunk)
+                expected_item = expected_members.get(normalized)
+                if (
+                    expected_item is None
+                    or expected_item.get("size") != info.file_size
+                    or expected_item.get("sha256") != digest.hexdigest()
+                ):
+                    raise typer.BadParameter("archive member hash verification failed")
         for item in temporary.iterdir():
             shutil.move(str(item), output / item.name)
     finally:

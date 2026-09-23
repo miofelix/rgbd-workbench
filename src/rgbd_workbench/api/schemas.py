@@ -18,6 +18,7 @@ class MetadataUpdate(BaseModel):
     invalid_values: list[float] = Field(default_factory=list)
     valid_min: float | None = Field(default=None, gt=0)
     valid_max: float | None = Field(default=None, gt=0)
+    orientation_confirmed: bool = False
     camera: CameraSpec | None = None
     alignment: AlignmentSpec | None = None
 

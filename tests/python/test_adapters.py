@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import json
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -115,6 +117,34 @@ def test_numpy_depth_probe_rejects_object_and_multiple_arrays(tmp_path: Path, ex
         assert any(item.code == "DEPTH_ARRAY_SELECTION_REQUIRED" for item in candidate.diagnostics)
 
 
+def test_numpy_header_size_is_rejected_before_array_materialization(tmp_path: Path):
+    header = io.BytesIO()
+    np.lib.format.write_array_header_1_0(
+        header,
+        {"descr": np.dtype("<f4").str, "fortran_order": False, "shape": (9000, 9000)},
+    )
+    path = tmp_path / "bomb.npy"
+    path.write_bytes(header.getvalue())
+
+    candidate = AdapterRegistry.default().probe(path, "depth")
+    assert any(item.code == "DEPTH_SIZE_LIMIT" for item in candidate.diagnostics)
+
+
+def test_npz_uncompressed_member_size_is_bounded(tmp_path: Path):
+    path = tmp_path / "bomb.npz"
+    header = io.BytesIO()
+    np.lib.format.write_array_header_1_0(
+        header,
+        {"descr": np.dtype("<f4").str, "fortran_order": False, "shape": (9000, 9000)},
+    )
+    payload = header.getvalue()
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("large.npy", payload)
+
+    candidate = AdapterRegistry.default().probe(path, "depth")
+    assert any(item.code == "DEPTH_SIZE_LIMIT" for item in candidate.diagnostics)
+
+
 def test_float_tiff_and_pfm_probe_shape_and_endianness(tmp_path: Path):
     tiff = tmp_path / "depth.tiff"
     Image.fromarray(np.array([[0.1, 0.2], [0.3, 0.4]], dtype=np.float32)).save(tiff)
@@ -143,6 +173,14 @@ def test_manifest_loader_rejects_unsafe_yaml_and_oversized_document(tmp_path: Pa
     huge.write_text(json.dumps({"padding": "x" * (2 * 1024 * 1024)}), encoding="utf-8")
     with pytest.raises(ValueError, match="size"):
         load_manifest_document(huge, max_bytes=1024)
+
+    nested = tmp_path / "nested.json"
+    value: object = "leaf"
+    for _ in range(80):
+        value = [value]
+    nested.write_text(json.dumps(value), encoding="utf-8")
+    with pytest.raises(ValueError, match="depth"):
+        load_manifest_document(nested)
 
 
 def test_registry_probes_manifest_role_without_exposing_path(tmp_path: Path):

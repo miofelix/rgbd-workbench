@@ -1,15 +1,16 @@
 import { FileUp, LoaderCircle, ShieldCheck } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { commitImport, confirmImport, probeImport } from "../../api/client";
+import { commitImport, confirmImport, getImport, probeImport } from "../../api/client";
 import type { MetadataPayload, ProbeResponse, SceneSummary } from "../../api/types";
 
 interface ImportWizardProps {
   onCommitted: (scene: SceneSummary) => void;
   onProbed?: (probe: ProbeResponse) => void;
+  initialImportId?: string;
 }
 
-export function ImportWizard({ onCommitted, onProbed }: ImportWizardProps): React.JSX.Element {
+export function ImportWizard({ onCommitted, onProbed, initialImportId }: ImportWizardProps): React.JSX.Element {
   const [rgb, setRgb] = useState<File | null>(null);
   const [depth, setDepth] = useState<File | null>(null);
   const [manifest, setManifest] = useState<File | undefined>();
@@ -18,22 +19,33 @@ export function ImportWizard({ onCommitted, onProbed }: ImportWizardProps): Reac
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const request = useRef<AbortController | null>(null);
+  const revision = useRef(0);
 
-  const runProbe = async (nextRgb: File | null, nextDepth: File | null): Promise<void> => {
-    if (!nextRgb || !nextDepth) return;
+  const beginRequest = (): { controller: AbortController; requestRevision: number } => {
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
+    revision.current += 1;
+    return { controller, requestRevision: revision.current };
+  };
+
+  const runProbe = async (nextRgb: File | null, nextDepth: File | null): Promise<void> => {
+    if (!nextRgb || !nextDepth) return;
+    const { controller, requestRevision } = beginRequest();
     setBusy(true);
     setError(null);
     try {
       const result = await probeImport({ rgb: nextRgb, depth: nextDepth, manifest, signal: controller.signal });
-      setProbe(result);
-      onProbed?.(result);
+      if (requestRevision === revision.current && !controller.signal.aborted) {
+        setProbe(result);
+        onProbed?.(result);
+      }
     } catch (cause) {
-      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "导入探测失败");
+      if (requestRevision === revision.current && !controller.signal.aborted) {
+        setError(cause instanceof Error ? cause.message : "导入探测失败");
+      }
     } finally {
-      if (!controller.signal.aborted) setBusy(false);
+      if (requestRevision === revision.current && !controller.signal.aborted) setBusy(false);
     }
   };
 
@@ -41,39 +53,86 @@ export function ImportWizard({ onCommitted, onProbed }: ImportWizardProps): Reac
     setMetadata((current) => ({ ...current, ...patch }));
   };
 
+  const depthCandidate = probe?.candidates.depth;
+
+  const cameraDraft = metadata.camera ?? {
+    model: "pinhole" as const,
+    width: depthCandidate?.source.width ?? 0,
+    height: depthCandidate?.source.height ?? 0,
+    fx: 0,
+    fy: 0,
+    cx: 0,
+    cy: 0,
+    distortion_model: "none" as const,
+  };
+
+  const updateCamera = (field: "width" | "height" | "fx" | "fy" | "cx" | "cy", value: string): void => {
+    updateMetadata({ camera: { ...cameraDraft, [field]: Number(value) } });
+  };
+
+  useEffect(() => {
+    if (!initialImportId) return;
+    const { controller, requestRevision } = beginRequest();
+    setBusy(true);
+    void getImport(initialImportId, controller.signal)
+      .then((result) => {
+        if (requestRevision === revision.current && !controller.signal.aborted) {
+          setProbe(result);
+          onProbed?.(result);
+        }
+      })
+      .catch((cause: unknown) => {
+        if (requestRevision === revision.current && !controller.signal.aborted) {
+          setError(cause instanceof Error ? cause.message : "无法恢复导入会话");
+        }
+      })
+      .finally(() => {
+        if (requestRevision === revision.current && !controller.signal.aborted) setBusy(false);
+      });
+  }, [initialImportId, onProbed]);
+
   const confirm = async (): Promise<void> => {
     if (!probe) return;
+    const { controller, requestRevision } = beginRequest();
     setBusy(true);
     setError(null);
     try {
-      const result = await confirmImport(probe.import_id, metadata);
-      setProbe(result);
-      onProbed?.(result);
+      const result = await confirmImport(probe.import_id, metadata, controller.signal);
+      if (requestRevision === revision.current && !controller.signal.aborted) {
+        setProbe(result);
+        onProbed?.(result);
+      }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "参数确认失败");
+      if (requestRevision === revision.current && !controller.signal.aborted) {
+        setError(cause instanceof Error ? cause.message : "参数确认失败");
+      }
     } finally {
-      setBusy(false);
+      if (requestRevision === revision.current) setBusy(false);
     }
   };
 
   const commit = async (): Promise<void> => {
     if (!probe) return;
+    const { controller, requestRevision } = beginRequest();
     setBusy(true);
     setError(null);
     try {
-      const result = await commitImport(probe.import_id);
-      onCommitted(result.scene);
-      setProbe(null);
-      setRgb(null);
-      setDepth(null);
+      const result = await commitImport(probe.import_id, controller.signal);
+      if (requestRevision === revision.current && !controller.signal.aborted) {
+        onCommitted(result.scene);
+        setProbe(null);
+        setRgb(null);
+        setDepth(null);
+      }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Scene 保存失败");
+      if (requestRevision === revision.current && !controller.signal.aborted) {
+        setError(cause instanceof Error ? cause.message : "Scene 保存失败");
+      }
     } finally {
-      setBusy(false);
+      if (requestRevision === revision.current) setBusy(false);
     }
   };
 
-  const depthCandidate = probe?.candidates.depth;
   const diagnostics = [
     ...(probe?.diagnostics ?? []),
     ...(depthCandidate?.diagnostics ?? []),
@@ -181,7 +240,63 @@ export function ImportWizard({ onCommitted, onProbed }: ImportWizardProps): Reac
                 onChange={(event) => updateMetadata({ display_name: event.target.value || undefined })}
               />
             </label>
+            <label>米制比例（可选）
+              <input
+                aria-label="米制比例"
+                type="number"
+                min="0"
+                step="any"
+                placeholder="例如 0.001"
+                value={metadata.scale_to_meter ?? ""}
+                onChange={(event) => updateMetadata({ scale_to_meter: event.target.value ? Number(event.target.value) : undefined })}
+              />
+            </label>
+            <label>无效值（可选）
+              <input
+                aria-label="深度无效值"
+                type="text"
+                placeholder="例如 0"
+                value={metadata.invalid_values?.join(", ") ?? ""}
+                onChange={(event) => updateMetadata({ invalid_values: event.target.value ? event.target.value.split(",").map(Number).filter(Number.isFinite) : [] })}
+              />
+            </label>
+            <label>对齐状态
+              <select
+                aria-label="对齐状态"
+                value={metadata.alignment?.state ?? "unknown"}
+                onChange={(event) => updateMetadata({ alignment: { state: event.target.value as "registered_to_rgb" | "unregistered" | "unknown" } })}
+              >
+                <option value="unknown">未确认</option>
+                <option value="registered_to_rgb">已对齐到 RGB</option>
+                <option value="unregistered">未对齐</option>
+              </select>
+            </label>
           </div>
+          <fieldset className="camera-fields">
+            <legend>相机内参（可选，点云需要）</legend>
+            <div className="camera-grid">
+              {(["width", "height", "fx", "fy", "cx", "cy"] as const).map((field) => (
+                <label key={field}>{field.toUpperCase()}
+                  <input
+                    aria-label={`相机 ${field}`}
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={cameraDraft[field] || ""}
+                    onChange={(event) => updateCamera(field, event.target.value)}
+                  />
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <label className="orientation-check">
+            <input
+              type="checkbox"
+              checked={metadata.orientation_confirmed ?? false}
+              onChange={(event) => updateMetadata({ orientation_confirmed: event.target.checked })}
+            />
+            我已确认 RGB 与深度使用相同的图像方向
+          </label>
           <div className="wizard-actions">
             <span className="security-note"><ShieldCheck size={15} /> 本地处理 · 不上传</span>
             <button type="button" className="secondary" onClick={() => void confirm()} disabled={busy}>确认参数</button>

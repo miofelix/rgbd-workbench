@@ -11,6 +11,26 @@ from rgbd_workbench.adapters.image import MAX_FILE_BYTES, _source
 from rgbd_workbench.domain.diagnostics import Diagnostic
 
 DEFAULT_MAX_BYTES = 1024 * 1024
+MAX_NODES = 100_000
+MAX_DEPTH = 64
+
+
+def _validate_structure(value: Any, *, depth: int = 0, nodes: list[int] | None = None) -> None:
+    if nodes is None:
+        nodes = [0]
+    nodes[0] += 1
+    if nodes[0] > MAX_NODES:
+        raise ValueError("manifest node limit exceeded")
+    if depth > MAX_DEPTH:
+        raise ValueError("manifest depth limit exceeded")
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if not isinstance(key, str):
+                raise ValueError("manifest keys must be strings")
+            _validate_structure(child, depth=depth + 1, nodes=nodes)
+    elif isinstance(value, list):
+        for child in value:
+            _validate_structure(child, depth=depth + 1, nodes=nodes)
 
 
 def load_manifest_document(path: Path, *, max_bytes: int = DEFAULT_MAX_BYTES) -> dict[str, Any]:
@@ -29,6 +49,7 @@ def load_manifest_document(path: Path, *, max_bytes: int = DEFAULT_MAX_BYTES) ->
         raise ValueError("manifest YAML must use safe constructs") from exc
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("manifest document is invalid") from exc
+    _validate_structure(value)
     if not isinstance(value, dict):
         raise ValueError("manifest root must be an object")
     return value

@@ -84,7 +84,7 @@ def probe_rgb(path: Path) -> ProbeCandidate:
                 diagnostics.append(
                     Diagnostic(
                         code="RGB_ORIENTATION_CONFIRMATION_REQUIRED",
-                        severity="warning",
+                        severity="fatal",
                         field="rgb.orientation",
                         message="RGB contains a non-default EXIF orientation.",
                         hint="Confirm an identical transform for RGB and depth before geometry.",

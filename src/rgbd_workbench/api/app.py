@@ -6,6 +6,7 @@ import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import numpy as np
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
@@ -18,7 +19,11 @@ from rgbd_workbench.adapters.base import ProbeCandidate
 from rgbd_workbench.adapters.manifest import probe_manifest
 from rgbd_workbench.adapters.registry import AdapterRegistry
 from rgbd_workbench.api.auth import COOKIE_NAME, SessionAuth
-from rgbd_workbench.api.schemas import DiagnosticResponse, MetadataUpdate, redacted_metadata
+from rgbd_workbench.api.schemas import (
+    DiagnosticResponse,
+    MetadataUpdate,
+    redacted_metadata,
+)
 from rgbd_workbench.domain.contracts import (
     DepthSpec,
     SceneManifestV1,
@@ -73,8 +78,11 @@ def _source_summary(source: SourceRef) -> dict[str, Any]:
     }
 
 
-def _scene_summary(scene: SceneManifestV1) -> dict[str, Any]:
-    report = capability_report(scene, [])
+def _scene_summary(
+    scene: SceneManifestV1,
+    diagnostics: list[Diagnostic] | tuple[Diagnostic, ...] = (),
+) -> dict[str, Any]:
+    report = capability_report(scene, diagnostics)
     return {
         "schema_version": scene.schema_version,
         "scene_id": scene.scene_id,
@@ -89,6 +97,7 @@ def _scene_summary(scene: SceneManifestV1) -> dict[str, Any]:
         "normalizer_version": scene.normalizer_version,
         "adapter_versions": scene.adapter_versions,
         "capabilities": report.model_dump(),
+        "diagnostics": _diagnostics(list(diagnostics)),
     }
 
 
@@ -136,6 +145,110 @@ def _build_scene(session: ImportSession) -> SceneManifestV1:
     )
 
 
+def _metadata_from_manifest(candidate: ProbeCandidate) -> MetadataUpdate:
+    document = candidate.metadata
+    nested_depth = document.get("depth")
+    depth: dict[str, Any] = nested_depth if isinstance(nested_depth, dict) else document
+    representation = depth.get("representation") or depth.get("type")
+    unit = depth.get("unit")
+    alignment_value = document.get("alignment")
+    if isinstance(alignment_value, str):
+        alignment = {"state": alignment_value}
+    elif isinstance(alignment_value, dict):
+        alignment = alignment_value
+    else:
+        alignment = None
+    camera = document.get("camera")
+    payload: dict[str, Any] = {
+        "display_name": document.get("display_name"),
+        "representation": representation,
+        "unit": unit,
+        "scale_to_meter": depth.get("scale_to_meter"),
+        "invalid_values": depth.get("invalid_values", []),
+        "valid_min": depth.get("valid_min"),
+        "valid_max": depth.get("valid_max"),
+        "camera": camera,
+        "alignment": alignment,
+    }
+    return MetadataUpdate.model_validate(
+        {key: value for key, value in payload.items() if value is not None}
+    )
+
+
+def _bind_staged_candidate(
+    candidate: ProbeCandidate,
+    staged_file: StagedFile,
+) -> ProbeCandidate:
+    return ProbeCandidate(
+        role=candidate.role,
+        source=candidate.source.model_copy(
+            update={
+                "source_id": staged_file.source_id,
+                "filename": staged_file.filename,
+                "sha256": staged_file.sha256,
+                "size_bytes": staged_file.size_bytes,
+            }
+        ),
+        metadata=candidate.metadata,
+        diagnostics=candidate.diagnostics,
+        path=candidate.path,
+    )
+
+
+def seed_import_from_paths(
+    application: FastAPI,
+    rgb_path: Path,
+    depth_path: Path,
+    manifest_path: Path | None = None,
+    *,
+    linked: bool = False,
+) -> str:
+    """Register a CLI-selected import in a freshly-created app session."""
+    store: WorkspaceStore = application.state.workspace_store
+    registry = AdapterRegistry.default()
+    import_id = secrets.token_hex(12)
+    staged: dict[str, StagedFile] = {}
+    candidates: dict[str, ProbeCandidate] = {}
+    for role, path in (("rgb", rgb_path), ("depth", depth_path)):
+        if linked:
+            source = store.register_linked(path, role)  # type: ignore[arg-type]
+            candidate = registry.probe(path, role)
+            candidates[role] = ProbeCandidate(
+                role=candidate.role,
+                source=source.model_copy(
+                    update={
+                        "width": candidate.source.width,
+                        "height": candidate.source.height,
+                        "dtype": candidate.source.dtype,
+                    }
+                ),
+                metadata=candidate.metadata,
+                diagnostics=candidate.diagnostics,
+                path=candidate.path,
+            )
+        else:
+            with path.open("rb") as stream:
+                staged_file = store.stage_bytes(
+                    path.name,
+                    stream,
+                    application.state.max_upload_bytes,
+                )
+            staged[role] = staged_file
+            candidates[role] = _bind_staged_candidate(
+                registry.probe(staged_file.path, role), staged_file
+            )
+    manifest_candidate = probe_manifest(manifest_path) if manifest_path else None
+    session = ImportSession(import_id, staged, candidates, manifest_candidate)
+    if manifest_candidate:
+        session.metadata = _metadata_from_manifest(manifest_candidate)
+    session.scene = _build_scene(session)
+    session.diagnostics = [
+        item for candidate in candidates.values() for item in candidate.diagnostics
+    ]
+    application.state.imports[import_id] = session
+    return import_id
+
+
 def create_app(
     workspace_root: Path,
     session_token: str | None = None,
@@ -151,6 +264,7 @@ def create_app(
     app.state.session_cookie = auth.session_cookie
     app.state.session_token = auth.raw_token
     app.state.workspace_root = store.paths.root
+    app.state.workspace_store = store
     app.state.max_upload_bytes = max_upload_bytes
     app.state.imports = imports
     app.add_middleware(SecurityHeadersMiddleware)
@@ -166,18 +280,15 @@ def create_app(
         if not auth.valid_cookie(request.cookies.get(COOKIE_NAME)):
             raise HTTPException(status_code=401, detail="session required")
         host = request.headers.get("host", "")
-        allowed_host = (
-            host.startswith("127.0.0.1")
-            or host.startswith("localhost")
-            or host.startswith("testserver")
-        )
+        host_name = host.rsplit(":", 1)[0].strip("[]") if host else ""
+        allowed_host = host_name in {"127.0.0.1", "localhost", "testserver", "::1"}
         if host and not allowed_host:
             raise HTTPException(status_code=403, detail="loopback host required")
         origin = request.headers.get("origin")
-        if origin and not any(
-            value in origin for value in ("127.0.0.1", "localhost", "testserver")
-        ):
-            raise HTTPException(status_code=403, detail="same-origin request required")
+        if origin:
+            origin_host = urlsplit(origin).hostname
+            if origin_host not in {"127.0.0.1", "localhost", "testserver", "::1"}:
+                raise HTTPException(status_code=403, detail="same-origin request required")
 
     @app.get("/api/v1/health")
     async def health() -> dict[str, Any]:
@@ -204,7 +315,10 @@ def create_app(
     async def list_scenes() -> dict[str, Any]:
         return {
             "schema_version": 1,
-            "scenes": [_scene_summary(scene) for scene in store.list_scenes()],
+            "scenes": [
+                _scene_summary(scene, store.revalidate_scene(scene.scene_id))
+                for scene in store.list_scenes()
+            ],
         }
 
     @app.get("/api/v1/scenes/{scene_id}", dependencies=[Depends(require_session)])
@@ -213,13 +327,17 @@ def create_app(
             scene = store.get_scene(scene_id)
         except (ValueError, FileNotFoundError) as exc:
             raise HTTPException(status_code=404, detail="scene not found") from exc
-        return {"schema_version": 1, "scene": _scene_summary(scene)}
+        diagnostics = store.revalidate_scene(scene_id)
+        return {"schema_version": 1, "scene": _scene_summary(scene, diagnostics)}
 
     @app.get("/api/v1/scenes/{scene_id}/preview/{role}", dependencies=[Depends(require_session)])
     async def scene_preview(scene_id: str, role: str) -> Response:
         if role not in {"rgb", "depth"}:
             raise HTTPException(status_code=404, detail="preview not found")
         scene = store.get_scene(scene_id)
+        stale = store.revalidate_scene(scene_id)
+        if stale:
+            raise HTTPException(status_code=409, detail="scene source is stale or missing")
         source = scene.rgb if role == "rgb" else scene.depth
         path = store.paths.root / "scenes" / scene_id / "sources" / source.filename
         if not path.is_file():
@@ -266,20 +384,8 @@ def create_app(
                     max_upload_bytes,
                 )
                 staged[role] = staged_file
-                candidate = registry.probe(staged_file.path, role)
-                candidates[role] = ProbeCandidate(
-                    role=candidate.role,
-                    source=candidate.source.model_copy(
-                        update={
-                            "source_id": staged_file.source_id,
-                            "filename": staged_file.filename,
-                            "sha256": staged_file.sha256,
-                            "size_bytes": staged_file.size_bytes,
-                        }
-                    ),
-                    metadata=candidate.metadata,
-                    diagnostics=candidate.diagnostics,
-                    path=candidate.path,
+                candidates[role] = _bind_staged_candidate(
+                    registry.probe(staged_file.path, role), staged_file
                 )
             manifest_candidate = None
             if manifest is not None:
@@ -289,10 +395,34 @@ def create_app(
                 staged["manifest"] = staged_manifest
                 manifest_candidate = probe_manifest(staged_manifest.path)
             session = ImportSession(import_id, staged, candidates, manifest_candidate)
+            if manifest_candidate is not None:
+                try:
+                    session.metadata = _metadata_from_manifest(manifest_candidate)
+                except Exception as exc:
+                    session.diagnostics.append(
+                        Diagnostic(
+                            code="MANIFEST_SCHEMA_INVALID",
+                            severity="fatal",
+                            field="manifest",
+                            message="Manifest semantics are invalid.",
+                            hint=str(exc),
+                            capability="metric_pointcloud",
+                        )
+                    )
             session.scene = _build_scene(session)
-            session.diagnostics = [
-                item for candidate in candidates.values() for item in candidate.diagnostics
-            ]
+            session.diagnostics.extend(
+                item for item in (manifest_candidate.diagnostics if manifest_candidate else [])
+            )
+            session.diagnostics.extend(
+                item
+                for candidate in candidates.values()
+                for item in candidate.diagnostics
+                if not (
+                    item.code == "RGB_ORIENTATION_CONFIRMATION_REQUIRED"
+                    and session.metadata
+                    and session.metadata.orientation_confirmed
+                )
+            )
             imports[import_id] = session
             report = capability_report(session.scene, session.diagnostics)
             return JSONResponse(
@@ -321,6 +451,29 @@ def create_app(
                 ) from exc
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    @app.get("/api/v1/imports/{import_id}", dependencies=[Depends(require_session)])
+    async def get_import(import_id: str) -> dict[str, Any]:
+        session = imports.get(import_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="import not found")
+        report = capability_report(session.scene, session.diagnostics) if session.scene else None
+        return {
+            "schema_version": 1,
+            "import_id": import_id,
+            "candidates": {
+                role: _candidate_summary(candidate)
+                for role, candidate in session.candidates.items()
+            },
+            "manifest": (
+                _candidate_summary(session.manifest_candidate)
+                if session.manifest_candidate
+                else None
+            ),
+            "scene": _scene_summary(session.scene, session.diagnostics) if session.scene else None,
+            "diagnostics": _diagnostics(session.diagnostics),
+            "capabilities": report.model_dump() if report else {},
+        }
+
     @app.put("/api/v1/imports/{import_id}/metadata", dependencies=[Depends(require_session)])
     async def update_metadata(import_id: str, payload: MetadataUpdate) -> JSONResponse:
         session = imports.get(import_id)
@@ -343,9 +496,18 @@ def create_app(
                 status_code=422,
                 content={"diagnostics": _diagnostics(session.diagnostics)},
             )
-        session.diagnostics = [
-            item for candidate in session.candidates.values() for item in candidate.diagnostics
-        ]
+        session.diagnostics = list(
+            session.manifest_candidate.diagnostics if session.manifest_candidate else []
+        )
+        session.diagnostics.extend(
+            item
+            for candidate in session.candidates.values()
+            for item in candidate.diagnostics
+            if not (
+                item.code == "RGB_ORIENTATION_CONFIRMATION_REQUIRED"
+                and payload.orientation_confirmed
+            )
+        )
         report = capability_report(session.scene, session.diagnostics)
         return JSONResponse(
             content={
@@ -376,7 +538,12 @@ def create_app(
         if session is None or session.scene is None:
             raise HTTPException(status_code=404, detail="import not found")
         try:
-            scene = store.commit_scene(session.scene, session.staged)
+            managed_sources = {
+                role: staged for role, staged in session.staged.items() if role in {"rgb", "depth"}
+            }
+            scene = store.commit_scene(session.scene, managed_sources)
+            if "manifest" in session.staged:
+                session.staged["manifest"].path.unlink(missing_ok=True)
         except (ValueError, FileExistsError, OSError) as exc:
             raise HTTPException(status_code=422, detail="import cannot be committed") from exc
         imports.pop(import_id, None)

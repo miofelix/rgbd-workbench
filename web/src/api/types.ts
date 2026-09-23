@@ -82,6 +82,7 @@ export interface MetadataPayload {
   invalid_values?: number[];
   valid_min?: number;
   valid_max?: number;
+  orientation_confirmed?: boolean;
   camera?: {
     model: "pinhole";
     width: number;

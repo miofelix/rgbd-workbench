@@ -104,6 +104,13 @@ h2, h3, p { margin: 0; }
 .semantic-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 9px; margin-top: 12px; }
 .semantic-grid label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; }
 .semantic-grid input, .semantic-grid select { width: 100%; min-height: 32px; padding: 0 8px; color: var(--ink); border: 1px solid #b8c5c9; border-radius: 3px; background: #fff; font-size: 11px; }
+.camera-fields { margin: 12px 0 0; padding: 10px; border: 1px solid var(--line); border-radius: 4px; }
+.camera-fields legend { padding: 0 5px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.camera-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 7px; }
+.camera-grid label { display: grid; gap: 4px; color: var(--muted); font-size: 9px; }
+.camera-grid input { width: 100%; min-height: 29px; padding: 0 6px; border: 1px solid #b8c5c9; border-radius: 3px; font-size: 10px; }
+.orientation-check { display: flex; align-items: center; gap: 7px; margin-top: 10px; color: var(--muted); font-size: 10px; }
+.orientation-check input { accent-color: var(--teal); }
 .wizard-actions { justify-content: flex-end; gap: 8px; margin-top: 13px; }
 .security-note { gap: 5px; margin-right: auto; color: var(--muted); font-size: 10px; }
 
@@ -177,6 +184,7 @@ h2, h3, p { margin: 0; }
   .mode-nav button small { display: none; }
   .main-content { padding: 12px; }
   .file-grid, .source-previews, .inspection-grid, .semantic-grid { grid-template-columns: 1fr; }
+  .camera-grid { grid-template-columns: repeat(3, 1fr); }
   .probe-summary, .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .wizard-actions { flex-wrap: wrap; }
   .security-note { width: 100%; margin-bottom: 3px; }

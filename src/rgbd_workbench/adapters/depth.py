@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,39 @@ from PIL import Image, UnidentifiedImageError
 from rgbd_workbench.adapters.base import ProbeCandidate
 from rgbd_workbench.adapters.image import MAX_FILE_BYTES, MAX_PIXELS, _source
 from rgbd_workbench.domain.diagnostics import Diagnostic
+
+MAX_ARRAY_BYTES = 256 * 1024 * 1024
+
+
+def _validate_npy_stream(stream: Any) -> None:
+    version = np.lib.format.read_magic(stream)
+    if version == (1, 0):
+        shape, _, dtype = np.lib.format.read_array_header_1_0(stream)
+    elif version == (2, 0):
+        shape, _, dtype = np.lib.format.read_array_header_2_0(stream)
+    elif version == (3, 0):
+        shape, _, dtype = np.lib.format.read_array_header_2_0(stream)
+    else:
+        raise ValueError("DEPTH_DECODE_FAILED: unsupported NPY version")
+    if dtype.hasobject:
+        raise ValueError("DEPTH_OBJECT_DTYPE: NPY object dtype is not allowed")
+    elements = int(np.prod(shape, dtype=np.int64))
+    if len(shape) != 2 or elements > MAX_PIXELS or elements * dtype.itemsize > MAX_ARRAY_BYTES:
+        raise ValueError("DEPTH_SIZE_LIMIT: NPY declared array exceeds configured limits")
+
+
+def _validate_npz_members(path: Path) -> list[str]:
+    with zipfile.ZipFile(path) as archive:
+        names = [name for name in archive.namelist() if name.endswith(".npy")]
+        if not names:
+            raise ValueError("DEPTH_DECODE_FAILED: NPZ has no NPY members")
+        for info in archive.infolist():
+            if info.file_size > MAX_ARRAY_BYTES:
+                raise ValueError("DEPTH_SIZE_LIMIT: NPZ member exceeds configured limits")
+        if len(names) == 1:
+            with archive.open(names[0]) as member:
+                _validate_npy_stream(member)
+        return names
 
 
 def _fatal(
@@ -79,6 +113,8 @@ def _load_array(path: Path, metadata: dict[str, Any]) -> np.ndarray:
     if suffix == ".pfm":
         return _load_pfm(path)
     if suffix == ".npy":
+        with path.open("rb") as stream:
+            _validate_npy_stream(stream)
         try:
             value = np.load(path, allow_pickle=False, mmap_mode="r")
         except (ValueError, OSError) as exc:
@@ -87,13 +123,13 @@ def _load_array(path: Path, metadata: dict[str, Any]) -> np.ndarray:
             raise ValueError("NPY object dtype is not allowed")
         return np.asarray(value)
     if suffix == ".npz":
+        names = _validate_npz_members(path)
         try:
             archive = np.load(path, allow_pickle=False)
-            names = list(archive.files)
             if len(names) != 1:
                 raise ValueError("NPZ contains multiple arrays")
             value = archive[names[0]]
-        except (ValueError, OSError) as exc:
+        except (ValueError, OSError, AttributeError) as exc:
             raise ValueError("NPZ depth archive is invalid") from exc
         if value.dtype.hasobject:
             raise ValueError("NPZ object dtype is not allowed")
@@ -177,7 +213,9 @@ def probe_depth(path: Path) -> ProbeCandidate:
         return ProbeCandidate("depth", source, metadata, diagnostics, path)
     except ValueError as exc:
         code = "DEPTH_DECODE_FAILED"
-        if "object dtype" in str(exc):
+        if "DEPTH_SIZE_LIMIT" in str(exc):
+            code = "DEPTH_SIZE_LIMIT"
+        elif "object dtype" in str(exc) or "DEPTH_OBJECT_DTYPE" in str(exc):
             code = "DEPTH_OBJECT_DTYPE"
         elif path.suffix.lower() == ".npz":
             try:

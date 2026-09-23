@@ -16,6 +16,7 @@ export function App(): React.JSX.Element {
     setMode,
     setImportSession,
   } = useWorkbenchStore();
+  const initialImportId = new URLSearchParams(window.location.search).get("import") ?? undefined;
 
   useEffect(() => {
     void loadScenes();
@@ -64,7 +65,7 @@ export function App(): React.JSX.Element {
           <div className="sidebar-footer"><span className="status-light" /> M1 · 输入与诊断</div>
         </aside>
         <main className="main-content">
-          <ImportWizard onProbed={setImportSession} onCommitted={(scene) => {
+          <ImportWizard initialImportId={initialImportId} onProbed={setImportSession} onCommitted={(scene) => {
             selectScene(scene);
             void loadScenes();
           }} />
