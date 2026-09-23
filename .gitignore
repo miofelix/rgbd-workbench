@@ -13,6 +13,7 @@ test-results/
 .superpowers/
 .DS_Store
 *.egg-info/
+*.tsbuildinfo
 .env
 /workspace/
 *.rgbdw

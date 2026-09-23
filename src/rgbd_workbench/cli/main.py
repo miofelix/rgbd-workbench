@@ -75,7 +75,7 @@ def serve(
 ) -> None:
     """Start the loopback-only local service."""
     root = resolve_workspace_root(workspace_root)
-    application = create_app(root)
+    application = create_app(root, session_token=os.environ.get("RGBD_WORKBENCH_SESSION_TOKEN"))
     url = f"http://127.0.0.1:{port}/?token={application.state.session_token}"
     typer.echo(f"RGB-D Lab: {url}")
     if not no_open:

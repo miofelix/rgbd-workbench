@@ -92,3 +92,8 @@ class AdapterRegistry:
         if candidate.role != "rgb":
             raise ValueError("RGB loader requires an RGB candidate")
         return load_rgb(candidate)
+
+    def load_depth(self, candidate: ProbeCandidate) -> np.ndarray:
+        if candidate.role != "depth":
+            raise ValueError("depth loader requires a depth candidate")
+        return load_depth(candidate)

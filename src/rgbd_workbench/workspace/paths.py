@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 
@@ -71,4 +70,3 @@ class WorkspacePaths:
             resolved.relative_to(self.root)
         except ValueError as exc:
             raise ValueError("workspace write destination is outside workspace") from exc
-

@@ -7,7 +7,7 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: "python -m rgbd_workbench.cli.main serve --no-open --port 8765",
+    command: "RGBD_WORKBENCH_SESSION_TOKEN=e2e-token .venv/bin/python -m rgbd_workbench.cli.main serve --no-open --port 8765",
     url: "http://127.0.0.1:8765/api/v1/health",
     reuseExistingServer: true,
   },

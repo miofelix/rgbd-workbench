@@ -153,3 +153,28 @@ def test_capabilities_route_is_stable_and_does_not_read_images(tmp_path: Path):
     payload = response.json()
     assert set(payload) >= {"schema_version", "decoders", "encoders", "limits"}
     assert "workspace" not in json.dumps(payload)
+
+
+def test_scene_depth_preview_returns_png_for_array_source(tmp_path: Path):
+    test_client = client(tmp_path)
+    test_client.cookies.set("rgbd_session", test_client.app.state.session_cookie)
+    created = test_client.post(
+        "/api/v1/imports",
+        files={
+            "rgb": ("color.png", png_bytes(), "image/png"),
+            "depth": ("depth.npy", depth_bytes(), "application/octet-stream"),
+        },
+    )
+    import_id = created.json()["import_id"]
+    confirmed = test_client.put(
+        f"/api/v1/imports/{import_id}/metadata",
+        json={"representation": "z_depth", "unit": "mm"},
+    )
+    assert confirmed.status_code == 200
+    committed = test_client.post(f"/api/v1/imports/{import_id}/commit")
+    scene_id = committed.json()["scene"]["scene_id"]
+
+    preview = test_client.get(f"/api/v1/scenes/{scene_id}/preview/depth")
+    assert preview.status_code == 200
+    assert preview.headers["content-type"].startswith("image/png")
+    assert preview.content.startswith(b"\x89PNG\r\n\x1a\n")

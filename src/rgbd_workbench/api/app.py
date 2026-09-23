@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import io
 import mimetypes
 import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from PIL import Image
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from rgbd_workbench import APP_VERSION
@@ -71,6 +74,7 @@ def _source_summary(source: SourceRef) -> dict[str, Any]:
 
 
 def _scene_summary(scene: SceneManifestV1) -> dict[str, Any]:
+    report = capability_report(scene, [])
     return {
         "schema_version": scene.schema_version,
         "scene_id": scene.scene_id,
@@ -84,6 +88,7 @@ def _scene_summary(scene: SceneManifestV1) -> dict[str, Any]:
         "coordinate_convention": scene.coordinate_convention,
         "normalizer_version": scene.normalizer_version,
         "adapter_versions": scene.adapter_versions,
+        "capabilities": report.model_dump(),
     }
 
 
@@ -211,7 +216,7 @@ def create_app(
         return {"schema_version": 1, "scene": _scene_summary(scene)}
 
     @app.get("/api/v1/scenes/{scene_id}/preview/{role}", dependencies=[Depends(require_session)])
-    async def scene_preview(scene_id: str, role: str) -> FileResponse:
+    async def scene_preview(scene_id: str, role: str) -> Response:
         if role not in {"rgb", "depth"}:
             raise HTTPException(status_code=404, detail="preview not found")
         scene = store.get_scene(scene_id)
@@ -219,8 +224,30 @@ def create_app(
         path = store.paths.root / "scenes" / scene_id / "sources" / source.filename
         if not path.is_file():
             raise HTTPException(status_code=404, detail="preview not found")
-        media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        return FileResponse(path, media_type=media_type)
+        if role == "rgb":
+            media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            return FileResponse(path, media_type=media_type)
+        try:
+            candidate = registry.probe(path, "depth")
+            raw = (
+                registry.normalize(candidate, scene).values
+                if scene.depth_spec
+                else np.asarray(registry.load_depth(candidate), dtype=np.float32)
+            )
+            valid = np.isfinite(raw) & (raw > 0)
+            if not np.any(valid):
+                raise ValueError("depth has no positive finite values")
+            low, high = np.percentile(raw[valid], [2, 98])
+            span = max(float(high - low), 1e-12)
+            scaled = np.clip((raw - low) / span, 0, 1)
+            gray = np.where(valid, np.round(scaled * 255), 0).astype(np.uint8)
+            image = Image.fromarray(gray, mode="L")
+            output = io.BytesIO()
+            image.save(output, format="PNG")
+            output.seek(0)
+            return StreamingResponse(output, media_type="image/png")
+        except (OSError, ValueError):
+            raise HTTPException(status_code=422, detail="depth preview is unavailable")
 
     @app.post("/api/v1/imports", status_code=201, dependencies=[Depends(require_session)])
     async def create_import(
@@ -325,6 +352,15 @@ def create_app(
                 "schema_version": 1,
                 "import_id": import_id,
                 "scene": _scene_summary(session.scene),
+                "candidates": {
+                    role: _candidate_summary(candidate)
+                    for role, candidate in session.candidates.items()
+                },
+                "manifest": (
+                    _candidate_summary(session.manifest_candidate)
+                    if session.manifest_candidate
+                    else None
+                ),
                 "diagnostics": _diagnostics(session.diagnostics),
                 "capabilities": report.model_dump(),
             }
@@ -354,5 +390,13 @@ def create_app(
         candidate = Path(__file__).resolve().parents[3] / "dist" / "web" / "index.html"
         fallback = Path(__file__).resolve().parents[3] / "web" / "index.html"
         return FileResponse(candidate if candidate.is_file() else fallback, media_type="text/html")
+
+    @app.get("/assets/{asset_path:path}", include_in_schema=False)
+    async def static_asset(asset_path: str) -> FileResponse:
+        root = (Path(__file__).resolve().parents[3] / "dist" / "web" / "assets").resolve()
+        target = (root / asset_path).resolve()
+        if not target.is_relative_to(root) or not target.is_file():
+            raise HTTPException(status_code=404, detail="asset not found")
+        return FileResponse(target)
 
     return app

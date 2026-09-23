@@ -19,7 +19,6 @@ from rgbd_workbench.domain.contracts import SceneManifestV1, SourceRef
 from rgbd_workbench.domain.diagnostics import Diagnostic
 from rgbd_workbench.workspace.paths import WorkspacePaths
 
-
 _SAFE_SCENE_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$")
 _CHUNK_SIZE = 1024 * 1024
 
@@ -57,7 +56,9 @@ class WorkspaceStore:
         total = 0
         digest = hashlib.sha256()
         try:
-            fd, temp_name = tempfile.mkstemp(prefix=f".{source_id}.", suffix=".tmp", dir=target.parent)
+            fd, temp_name = tempfile.mkstemp(
+                prefix=f".{source_id}.", suffix=".tmp", dir=target.parent
+            )
             temp_path = Path(temp_name)
             with os.fdopen(fd, "wb") as output:
                 while chunk := data.read(_CHUNK_SIZE):
@@ -118,7 +119,6 @@ class WorkspaceStore:
         scene_dir = self.paths.resolve_write_path(Path("scenes") / scene_id)
         if scene_dir.exists():
             raise FileExistsError(f"scene already exists: {scene_id}")
-        final_sources = scene_dir / "sources"
         temp_dir = scene_dir.parent / f".{scene_id}.{secrets.token_hex(8)}.tmp"
         self.paths._assert_inside_root(temp_dir)
         source_manifest = manifest.model_copy(deep=True)
@@ -132,12 +132,18 @@ class WorkspaceStore:
                 if role not in source_refs:
                     raise ValueError(f"unsupported managed source role: {role}")
                 expected = source_refs[role]
-                if expected.source_id != staged_file.source_id or expected.sha256 != staged_file.sha256:
+                if (
+                    expected.source_id != staged_file.source_id
+                    or expected.sha256 != staged_file.sha256
+                ):
                     raise ValueError(f"staged source does not match {role} manifest reference")
                 staged_path = staged_file.path.resolve(strict=True)
                 self.paths._assert_inside_root(staged_path)
                 actual_hash = self._hash_file(staged_path)
-                if actual_hash != staged_file.sha256 or staged_path.stat().st_size != staged_file.size_bytes:
+                if (
+                    actual_hash != staged_file.sha256
+                    or staged_path.stat().st_size != staged_file.size_bytes
+                ):
                     raise ValueError(f"staged {role} source changed before commit")
                 target_name = f"{role}-{staged_file.safe_name}"
                 target = managed_dir / target_name
@@ -156,7 +162,10 @@ class WorkspaceStore:
                 if not locator.is_file():
                     raise FileNotFoundError(f"linked {role} source is missing")
                 current_stat = locator.stat()
-                if current_stat.st_size != source.size_bytes or self._hash_file(locator) != source.sha256:
+                if (
+                    current_stat.st_size != source.size_bytes
+                    or self._hash_file(locator) != source.sha256
+                ):
                     raise ValueError(f"linked {role} source changed before commit")
                 registered_stat = linked[2]
                 linked_locators[role] = {
@@ -209,7 +218,11 @@ class WorkspaceStore:
         self.initialize()
         scenes: list[SceneManifestV1] = []
         for path in sorted(self.paths.scenes.iterdir()):
-            if path.is_dir() and _SAFE_SCENE_ID.fullmatch(path.name) and (path / "scene.json").is_file():
+            if (
+                path.is_dir()
+                and _SAFE_SCENE_ID.fullmatch(path.name)
+                and (path / "scene.json").is_file()
+            ):
                 scenes.append(self.get_scene(path.name))
         return scenes
 
