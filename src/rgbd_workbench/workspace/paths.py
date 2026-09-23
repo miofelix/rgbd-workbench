@@ -32,6 +32,9 @@ class WorkspacePaths:
     def exports(self) -> Path:
         return self.root / "exports"
 
+    def scene_cache(self, scene_id: str) -> Path:
+        return self.scenes / scene_id / "cache"
+
     def initialize(self) -> None:
         for directory in (
             self.staging,

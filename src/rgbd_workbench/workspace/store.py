@@ -15,12 +15,17 @@ from typing import BinaryIO, Literal
 from pydantic import ValidationError
 
 from rgbd_workbench.domain.canonical import canonical_json_bytes
-from rgbd_workbench.domain.contracts import SceneManifestV1, SourceRef
+from rgbd_workbench.domain.contracts import DerivationManifestV1, SceneManifestV1, SourceRef
 from rgbd_workbench.domain.diagnostics import Diagnostic
+from rgbd_workbench.processing.protocol import decode_pointcloud
 from rgbd_workbench.workspace.paths import WorkspacePaths
 
 _SAFE_SCENE_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$")
+_SAFE_DERIVATION_KEY = re.compile(r"^[a-f0-9]{64}$")
 _CHUNK_SIZE = 1024 * 1024
+_DERIVATION_FILES = frozenset(
+    {"manifest.json", "pointcloud.bin", "pointcloud.ply", "parameters.json"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +36,26 @@ class StagedFile:
     path: Path
     sha256: str
     size_bytes: int
+
+
+class SceneSourceError(ValueError):
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(f"{code}: {message}")
+
+
+@dataclass(frozen=True, slots=True)
+class CachedDerivation:
+    directory: Path
+    manifest: DerivationManifestV1
+
+    def path(self, name: str) -> Path:
+        if name not in _DERIVATION_FILES:
+            raise ValueError("unsupported derivation file")
+        return self.directory / name
+
+    def __getitem__(self, name: str) -> bytes:
+        return self.path(name).read_bytes()
 
 
 class WorkspaceStore:
@@ -126,6 +151,7 @@ class WorkspaceStore:
             temp_dir.mkdir(parents=True)
             managed_dir = temp_dir / "sources"
             managed_dir.mkdir()
+            (temp_dir / "cache").mkdir()
             source_refs = {"rgb": source_manifest.rgb, "depth": source_manifest.depth}
             linked_locators: dict[str, dict[str, str | int]] = {}
             for role, staged_file in staged.items():
@@ -194,7 +220,7 @@ class WorkspaceStore:
                         separators=(",", ":"),
                     ).encode("utf-8"),
                 )
-            for directory in (managed_dir, temp_dir):
+            for directory in (managed_dir, temp_dir / "cache", temp_dir):
                 self._fsync_directory(directory)
             os.replace(temp_dir, scene_dir)
             self._fsync_directory(scene_dir.parent)
@@ -205,6 +231,131 @@ class WorkspaceStore:
             if temp_dir.exists():
                 shutil.rmtree(temp_dir)
             raise
+
+    def scene_source_path(self, scene_id: str, role: Literal["rgb", "depth"]) -> Path:
+        """Return the managed source path for test/tooling inspection."""
+        manifest = self.get_scene(scene_id)
+        source = manifest.rgb if role == "rgb" else manifest.depth
+        return self.paths.resolve_write_path(
+            Path("scenes") / scene_id / "sources" / source.filename
+        )
+
+    def resolve_scene_source(self, scene_id: str, role: Literal["rgb", "depth"]) -> Path:
+        """Resolve and revalidate one Scene source without exposing its locator."""
+        manifest = self.get_scene(scene_id)
+        source = manifest.rgb if role == "rgb" else manifest.depth
+        managed_path = self.paths.resolve_write_path(
+            Path("scenes") / scene_id / "sources" / source.filename
+        )
+        if managed_path.exists() or managed_path.is_symlink():
+            if managed_path.is_symlink() or not managed_path.is_file():
+                raise SceneSourceError("SCENE_SOURCE_STALE", "managed source is not a regular file")
+            actual_hash = self._hash_file(managed_path)
+            if managed_path.stat().st_size != source.size_bytes or actual_hash != source.sha256:
+                raise SceneSourceError("SCENE_SOURCE_STALE", "managed source identity changed")
+            return managed_path
+
+        locator = self._read_linked_locator(scene_id, role)
+        if locator is None:
+            raise SceneSourceError("SCENE_SOURCE_MISSING", "managed source is missing")
+        path_value = locator.get("path")
+        if not isinstance(path_value, str):
+            raise SceneSourceError(
+                "LINKED_SOURCE_METADATA_INVALID", "linked source metadata is invalid"
+            )
+        linked_path = Path(path_value)
+        if not linked_path.is_file():
+            raise SceneSourceError("LINKED_SOURCE_MISSING", "linked source is missing")
+        linked_stat = linked_path.stat()
+        identity_matches = (
+            linked_stat.st_dev == locator.get("device")
+            and linked_stat.st_ino == locator.get("inode")
+            and linked_stat.st_size == locator.get("size") == source.size_bytes
+            and linked_stat.st_mtime_ns == locator.get("mtime_ns")
+        )
+        if not identity_matches or self._hash_file(linked_path) != source.sha256:
+            raise SceneSourceError("LINKED_SOURCE_STALE", "linked source identity changed")
+        return linked_path.resolve(strict=True)
+
+    def derivation_dir(self, scene_id: str, derivation_key: str) -> Path:
+        if not _SAFE_SCENE_ID.fullmatch(scene_id):
+            raise ValueError("scene id is invalid")
+        if not _SAFE_DERIVATION_KEY.fullmatch(derivation_key):
+            raise ValueError("derivation key is invalid")
+        return self.paths.resolve_write_path(Path("scenes") / scene_id / "cache" / derivation_key)
+
+    def read_cached_derivation(self, scene_id: str, derivation_key: str) -> CachedDerivation | None:
+        directory = self.derivation_dir(scene_id, derivation_key)
+        if not directory.exists():
+            return None
+        try:
+            cached = self._load_cached_derivation(directory, scene_id, derivation_key)
+        except (OSError, ValueError, ValidationError):
+            self._remove_cache_directory(directory)
+            return None
+        return cached
+
+    def publish_derivation(
+        self,
+        scene_id: str,
+        derivation_key: str,
+        files: Mapping[str, bytes],
+    ) -> None:
+        self.initialize()
+        self.get_scene(scene_id)
+        target = self.derivation_dir(scene_id, derivation_key)
+        if set(files) != _DERIVATION_FILES:
+            raise ValueError("derivation files are incomplete")
+        if target.exists():
+            if self.read_cached_derivation(scene_id, derivation_key) is not None:
+                return
+            if target.exists():
+                raise ValueError("derivation cache could not be replaced")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        self.paths._assert_inside_root(target.parent)
+        temp_dir = target.parent / f".{derivation_key}.{secrets.token_hex(8)}.tmp"
+        try:
+            temp_dir.mkdir(parents=True)
+            for name, data in files.items():
+                self._atomic_write(temp_dir / name, data)
+            self._load_cached_derivation(temp_dir, scene_id, derivation_key)
+            self._fsync_directory(temp_dir)
+            os.replace(temp_dir, target)
+            self._fsync_directory(target.parent)
+        finally:
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+
+    def _load_cached_derivation(
+        self, directory: Path, scene_id: str, derivation_key: str
+    ) -> CachedDerivation:
+        if directory.is_symlink() or not directory.is_dir():
+            raise ValueError("derivation cache directory is invalid")
+        paths = {name: directory / name for name in _DERIVATION_FILES}
+        if any(path.is_symlink() or not path.is_file() for path in paths.values()):
+            raise ValueError("derivation cache files are incomplete")
+        manifest = DerivationManifestV1.model_validate_json(paths["manifest.json"].read_bytes())
+        if (
+            manifest.scene_id != scene_id
+            or manifest.derivation_key != derivation_key
+            or manifest.derivation_id != f"derivation-{derivation_key}"
+        ):
+            raise ValueError("derivation key or scene id does not match cache")
+        binary = decode_pointcloud(paths["pointcloud.bin"].read_bytes())
+        if binary.manifest != manifest:
+            raise ValueError("point-cloud manifest does not match cache manifest")
+        parameters = DerivationManifestV1.model_validate_json(paths["parameters.json"].read_bytes())
+        if parameters != manifest:
+            raise ValueError("parameter manifest does not match cache manifest")
+        if not paths["pointcloud.ply"].read_bytes().startswith(b"ply\n"):
+            raise ValueError("PLY cache is invalid")
+        return CachedDerivation(directory=directory, manifest=manifest)
+
+    def _remove_cache_directory(self, directory: Path) -> None:
+        if directory.is_symlink():
+            directory.unlink(missing_ok=True)
+        elif directory.is_dir():
+            shutil.rmtree(directory)
 
     def get_scene(self, scene_id: str) -> SceneManifestV1:
         path = self._scene_file(scene_id)
