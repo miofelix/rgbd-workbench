@@ -60,6 +60,19 @@ export interface DerivationResponse {
   capabilities: Record<string, boolean>;
 }
 
+export interface ViewSpec {
+  projection: "perspective" | "orthographic";
+  colorMode: "rgb" | "depth" | "mono" | "validity";
+  pointSize: number;
+  background: "dark" | "light";
+}
+
+export interface SelectedPoint {
+  pixelIndex: number;
+  position: [number, number, number];
+  unit: "m" | "unitless";
+}
+
 export interface CapabilityReport {
   image_inspection: boolean;
   relative_pointcloud: boolean;
