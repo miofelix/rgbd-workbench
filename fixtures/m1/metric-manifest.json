@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "representation": "z_depth",
+  "unit": "m",
+  "alignment": "registered_to_rgb"
+}

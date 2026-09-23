@@ -8,9 +8,11 @@ import sys
 import tempfile
 import tomllib
 import zipfile
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
+import imageio_ffmpeg  # type: ignore[import-untyped]
 import typer
 import uvicorn
 from platformdirs import user_config_dir
@@ -146,7 +148,12 @@ def doctor(
         "frontend": {
             "built_assets": (Path(__file__).resolve().parents[3] / "dist" / "web").is_dir()
         },
-        "ffmpeg": {"available": bool(os.environ.get("RGBD_WORKBENCH_FFMPEG"))},
+        "ffmpeg": {
+            "available": bool(
+                os.environ.get("RGBD_WORKBENCH_FFMPEG") or imageio_ffmpeg.get_ffmpeg_exe()
+            )
+        },
+        "optional_adapters": {"exr": find_spec("OpenEXR") is not None},
         "limits": {"max_upload_bytes": 2 * 1024 * 1024 * 1024, "max_pixels": 64 * 1024 * 1024},
     }
     if json_output:

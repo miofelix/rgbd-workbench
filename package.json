@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:e2e": "playwright test",
+    "check:m1": "bash scripts/run-m1-checks.sh",
     "lint": "eslint .",
     "format:check": "prettier --check ."
   },
