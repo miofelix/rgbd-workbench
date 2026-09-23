@@ -7,11 +7,8 @@ import {
   useState,
 } from "react";
 
-import type { SelectedPoint } from "../../api/types";
-import {
-  createPointCloudScene,
-  type PointCloudSceneHandle,
-} from "../../viewer/pointcloud-scene";
+import type { SelectedPoint, ViewSpec } from "../../api/types";
+import type { PointCloudSceneHandle } from "../../viewer/pointcloud-scene";
 import { parsePointCloudPayload } from "./pointcloud-protocol";
 
 export interface PointCloudViewerHandle {
@@ -22,17 +19,32 @@ export interface PointCloudViewerHandle {
 interface PointCloudViewerProps {
   pointcloudUrl: string;
   onPointSelected: (point: SelectedPoint) => void;
+  viewSpec?: ViewSpec;
+  onViewSpecChange?: (patch: Partial<ViewSpec>) => void;
 }
+
+const DEFAULT_VIEW_SPEC: ViewSpec = {
+  projection: "perspective",
+  colorMode: "rgb",
+  pointSize: 2,
+  background: "dark",
+};
 
 export const PointCloudViewer = forwardRef<
   PointCloudViewerHandle,
   PointCloudViewerProps
 >(function PointCloudViewer(
-  { pointcloudUrl, onPointSelected },
+  {
+    pointcloudUrl,
+    onPointSelected,
+    viewSpec = DEFAULT_VIEW_SPEC,
+    onViewSpecChange,
+  },
   ref,
 ): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<PointCloudSceneHandle | null>(null);
+  const latestViewSpec = useRef(viewSpec);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -46,24 +58,38 @@ export const PointCloudViewer = forwardRef<
   );
 
   useEffect(() => {
+    latestViewSpec.current = viewSpec;
+    sceneRef.current?.setViewSpec(viewSpec);
+  }, [viewSpec]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas === null) return undefined;
     const controller = new AbortController();
-    const pointcloudScene = createPointCloudScene(canvas);
-    sceneRef.current = pointcloudScene;
+    let pointcloudScene: PointCloudSceneHandle | null = null;
     setError(null);
     setLoading(true);
-    void fetch(pointcloudUrl, {
-      credentials: "include",
-      signal: controller.signal,
-    })
-      .then(async (response) => {
+    void import("../../viewer/pointcloud-scene")
+      .then(async ({ createPointCloudScene }) => {
+        if (controller.signal.aborted) return null;
+        pointcloudScene = createPointCloudScene(canvas);
+        sceneRef.current = pointcloudScene;
+        pointcloudScene.setViewSpec(latestViewSpec.current);
+        const response = await fetch(pointcloudUrl, {
+          credentials: "include",
+          signal: controller.signal,
+        });
         if (!response.ok)
           throw new Error(`Point-cloud request failed (${response.status})`);
         return response.arrayBuffer();
       })
       .then((buffer) => {
-        if (controller.signal.aborted) return;
+        if (
+          controller.signal.aborted ||
+          buffer === null ||
+          pointcloudScene === null
+        )
+          return;
         pointcloudScene.setPoints(parsePointCloudPayload(buffer));
         setLoading(false);
       })
@@ -74,7 +100,7 @@ export const PointCloudViewer = forwardRef<
       });
     return () => {
       controller.abort();
-      pointcloudScene.dispose();
+      pointcloudScene?.dispose();
       if (sceneRef.current === pointcloudScene) sceneRef.current = null;
     };
   }, [pointcloudUrl]);
@@ -83,15 +109,66 @@ export const PointCloudViewer = forwardRef<
     <section className="pointcloud-viewer" aria-label="点云查看器">
       <div className="pointcloud-toolbar">
         <span>{loading ? "正在加载点云" : "点云视图"}</span>
-        <button
-          type="button"
-          className="icon-button small"
-          aria-label="适配视图"
-          title="适配视图"
-          onClick={() => sceneRef.current?.resetView()}
-        >
-          <Maximize2 size={15} />
-        </button>
+        <div className="viewer-controls">
+          <div className="segmented-control" aria-label="投影模式">
+            <button
+              type="button"
+              className={viewSpec.projection === "perspective" ? "active" : ""}
+              aria-label="透视投影"
+              onClick={() => onViewSpecChange?.({ projection: "perspective" })}
+            >
+              透视
+            </button>
+            <button
+              type="button"
+              className={viewSpec.projection === "orthographic" ? "active" : ""}
+              aria-label="正交投影"
+              onClick={() => onViewSpecChange?.({ projection: "orthographic" })}
+            >
+              正交
+            </button>
+          </div>
+          <label className="viewer-select">
+            <span>着色</span>
+            <select
+              aria-label="点云着色"
+              value={viewSpec.colorMode}
+              onChange={(event) =>
+                onViewSpecChange?.({
+                  colorMode: event.target.value as ViewSpec["colorMode"],
+                })
+              }
+            >
+              <option value="rgb">RGB</option>
+              <option value="depth">深度</option>
+              <option value="mono">单色</option>
+              <option value="validity">有效性</option>
+            </select>
+          </label>
+          <label className="viewer-range">
+            <span>点</span>
+            <input
+              aria-label="点大小"
+              type="range"
+              min="1"
+              max="8"
+              step="1"
+              value={viewSpec.pointSize}
+              onChange={(event) =>
+                onViewSpecChange?.({ pointSize: Number(event.target.value) })
+              }
+            />
+          </label>
+          <button
+            type="button"
+            className="icon-button small"
+            aria-label="适配视图"
+            title="适配视图"
+            onClick={() => sceneRef.current?.resetView()}
+          >
+            <Maximize2 size={15} />
+          </button>
+        </div>
       </div>
       <canvas
         ref={canvasRef}

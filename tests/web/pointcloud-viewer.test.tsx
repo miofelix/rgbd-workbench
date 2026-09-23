@@ -6,6 +6,7 @@ import { pointcloudPayload } from "./pointcloud-fixtures";
 const sceneMocks = vi.hoisted(() => ({
   setPoints: vi.fn(),
   resetView: vi.fn(),
+  setViewSpec: vi.fn(),
   pick: vi.fn(),
   capturePng: vi.fn(() => "data:image/png;base64,fixture"),
   dispose: vi.fn(),
@@ -39,6 +40,7 @@ describe("PointCloudViewer", () => {
     );
 
     await waitFor(() => expect(sceneMocks.setPoints).toHaveBeenCalledTimes(1));
+    expect(sceneMocks.setViewSpec).toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "适配视图" }));
     expect(sceneMocks.resetView).toHaveBeenCalledTimes(1);
 

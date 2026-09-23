@@ -26,6 +26,8 @@ interface WorkbenchState {
   draftProcessing: ProcessingSpec;
   appliedProcessing: ProcessingSpec | null;
   appliedDerivation: DerivationManifest | null;
+  appliedDerivationUrls: DerivationResponse["urls"] | null;
+  derivationCached: boolean;
   viewSpec: ViewSpec;
   selectedPoints: SelectedPoint[];
   derivationBusy: boolean;
@@ -88,6 +90,8 @@ const initialState = {
   draftProcessing: freshProcessing(),
   appliedProcessing: null as ProcessingSpec | null,
   appliedDerivation: null as DerivationManifest | null,
+  appliedDerivationUrls: null as DerivationResponse["urls"] | null,
+  derivationCached: false,
   viewSpec: { ...DEFAULT_VIEW },
   selectedPoints: [] as SelectedPoint[],
   derivationBusy: false,
@@ -121,6 +125,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       draftProcessing: freshProcessing(),
       appliedProcessing: null,
       appliedDerivation: null,
+      appliedDerivationUrls: null,
+      derivationCached: false,
       selectedPoints: [],
       derivationBusy: false,
     }));
@@ -154,6 +160,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     set((state) => ({
       appliedProcessing: null,
       appliedDerivation: null,
+      appliedDerivationUrls: null,
+      derivationCached: false,
       selectedPoints: [],
       derivationBusy: false,
       derivationRequestRevision: state.derivationRequestRevision + 1,
@@ -183,6 +191,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       set({
         appliedProcessing: processing,
         appliedDerivation: response.derivation,
+        appliedDerivationUrls: response.urls,
+        derivationCached: response.cached,
         diagnostics: response.diagnostics,
       });
     } catch (cause) {
