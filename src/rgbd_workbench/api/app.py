@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import mimetypes
+import re
 import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,21 +21,47 @@ from rgbd_workbench.adapters.manifest import probe_manifest
 from rgbd_workbench.adapters.registry import AdapterRegistry
 from rgbd_workbench.api.auth import COOKIE_NAME, SessionAuth
 from rgbd_workbench.api.schemas import (
+    DerivationResponse,
+    DerivationUrls,
     DiagnosticResponse,
     MetadataUpdate,
     redacted_metadata,
 )
+from rgbd_workbench.domain.canonical import (
+    derivation_id_from_key,
+    derivation_key,
+    scene_hash,
+)
 from rgbd_workbench.domain.contracts import (
+    PROCESSOR_VERSION,
     DepthSpec,
+    DerivationManifestV1,
+    ProcessingSpecV1,
     RawDepthDescriptor,
     SceneManifestV1,
     SourceRef,
     capability_report,
 )
 from rgbd_workbench.domain.diagnostics import Diagnostic
-from rgbd_workbench.workspace.store import StagedFile, WorkspaceStore
+from rgbd_workbench.processing.pointcloud import (
+    PointCloudProcessingError,
+    build_derivation,
+)
+from rgbd_workbench.processing.protocol import (
+    derivation_json,
+    encode_ply,
+    encode_pointcloud,
+    manifest_for_result,
+)
+from rgbd_workbench.workspace.store import (
+    CachedDerivation,
+    SceneSourceError,
+    StagedFile,
+    WorkspaceStore,
+)
 
 DEFAULT_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
+_DERIVATION_ID = re.compile(r"^derivation-([a-f0-9]{64})$")
 
 
 @dataclass(slots=True)
@@ -109,6 +136,140 @@ def _candidate_summary(candidate: ProbeCandidate) -> dict[str, Any]:
         "source": _source_summary(candidate.source),
         "metadata": redacted_metadata(candidate.metadata),
         "diagnostics": _diagnostics(candidate.diagnostics),
+    }
+
+
+def _derivation_urls(derivation_id: str) -> DerivationUrls:
+    base = f"/api/v1/derivations/{derivation_id}"
+    return DerivationUrls(
+        pointcloud=f"{base}/pointcloud",
+        ply=f"{base}/export/ply",
+        json=f"{base}/export/json",
+    )
+
+
+def _derivation_payload(
+    manifest: DerivationManifestV1,
+    *,
+    cached: bool,
+    capabilities: dict[str, bool],
+) -> dict[str, Any]:
+    response = DerivationResponse(
+        schema_version=1,
+        cached=cached,
+        derivation=manifest.model_dump(mode="json"),
+        urls=_derivation_urls(manifest.derivation_id),
+        diagnostics=[DiagnosticResponse.from_diagnostic(item) for item in manifest.diagnostics],
+        capabilities=capabilities,
+    )
+    return response.model_dump(mode="json", by_alias=True)
+
+
+def _derivation_failure(
+    code: str,
+    message: str,
+    hint: str,
+    capability: str | None,
+) -> JSONResponse:
+    diagnostic = Diagnostic(
+        code=code,
+        severity="fatal",
+        field="derivation",
+        message=message,
+        hint=hint,
+        capability=capability,
+    )
+    return JSONResponse(status_code=422, content={"diagnostics": _diagnostics([diagnostic])})
+
+
+def _derivation_key_from_id(derivation_id: str) -> str:
+    match = _DERIVATION_ID.fullmatch(derivation_id)
+    if match is None:
+        raise ValueError("derivation id is invalid")
+    return match.group(1)
+
+
+def _find_cached_derivation(
+    store: WorkspaceStore, derivation_id: str
+) -> tuple[str, CachedDerivation] | None:
+    key = _derivation_key_from_id(derivation_id)
+    for scene in store.list_scenes():
+        cached = store.read_cached_derivation(scene.scene_id, key)
+        if cached is not None and cached.manifest.derivation_id == derivation_id:
+            return scene.scene_id, cached
+    return None
+
+
+def _stale_cache_response(store: WorkspaceStore, scene_id: str) -> JSONResponse | None:
+    stale = store.revalidate_scene(scene_id)
+    if not stale:
+        return None
+    return JSONResponse(status_code=409, content={"diagnostics": _diagnostics(stale)})
+
+
+def _build_derivation_artifacts(
+    store: WorkspaceStore,
+    registry: AdapterRegistry,
+    scene: SceneManifestV1,
+    processing: ProcessingSpecV1,
+    scene_hash_value: str,
+    derivation_key_value: str,
+) -> tuple[DerivationManifestV1, dict[str, bytes]]:
+    try:
+        rgb_path = store.resolve_scene_source(scene.scene_id, "rgb")
+        depth_path = store.resolve_scene_source(scene.scene_id, "depth")
+        rgb_candidate = registry.probe(rgb_path, "rgb")
+        depth_candidate = registry.probe(
+            depth_path,
+            "depth",
+            raw_descriptor=scene.raw_descriptor.model_dump() if scene.raw_descriptor else None,
+        )
+        fatal_probe = [
+            item
+            for candidate in (rgb_candidate, depth_candidate)
+            for item in candidate.diagnostics
+            if item.severity == "fatal"
+            and not (item.code == "DEPTH_SEMANTICS_REQUIRED" and scene.depth_spec is not None)
+        ]
+        if fatal_probe:
+            raise PointCloudProcessingError(fatal_probe)
+        rgb = registry.load_rgb(rgb_candidate)
+        normalized_depth = registry.normalize(depth_candidate, scene)
+        result = build_derivation(scene, rgb, normalized_depth, processing)
+    except SceneSourceError:
+        raise
+    except PointCloudProcessingError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise PointCloudProcessingError(
+            [
+                Diagnostic(
+                    code="DERIVATION_SOURCE_INVALID",
+                    severity="fatal",
+                    field="scene.source",
+                    message="Scene sources could not be loaded for derivation.",
+                    hint="Re-import the source pair and confirm its explicit depth metadata.",
+                    capability="metric_pointcloud",
+                )
+            ]
+        ) from exc
+    base = {
+        "schema_version": 1,
+        "derivation_id": derivation_id_from_key(derivation_key_value),
+        "scene_id": scene.scene_id,
+        "scene_hash": scene_hash_value,
+        "derivation_key": derivation_key_value,
+        "processor_version": PROCESSOR_VERSION,
+        "processing": processing.model_dump(mode="python"),
+    }
+    manifest = manifest_for_result(result, base)
+    binary = encode_pointcloud(result, manifest)
+    json_bytes = derivation_json(manifest)
+    return manifest, {
+        "manifest.json": json_bytes,
+        "pointcloud.bin": binary,
+        "pointcloud.ply": encode_ply(result, manifest),
+        "parameters.json": json_bytes,
     }
 
 
@@ -480,6 +641,163 @@ def create_app(
             return StreamingResponse(output, media_type="image/png")
         except (OSError, ValueError):
             raise HTTPException(status_code=422, detail="depth preview is unavailable")
+
+    @app.post(
+        "/api/v1/scenes/{scene_id}/derivations",
+        dependencies=[Depends(require_session)],
+    )
+    async def create_derivation(
+        scene_id: str,
+        processing: ProcessingSpecV1,
+    ) -> JSONResponse:
+        try:
+            scene = store.get_scene(scene_id)
+        except (ValueError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail="scene not found") from exc
+        stale = store.revalidate_scene(scene_id)
+        if stale:
+            return JSONResponse(status_code=422, content={"diagnostics": _diagnostics(stale)})
+        capabilities = capability_report(scene, []).model_dump()
+        capability = (
+            "metric_pointcloud"
+            if scene.depth_spec is not None and scene.depth_spec.representation == "z_depth"
+            else "relative_pointcloud"
+        )
+        if not capabilities.get(capability, False):
+            return _derivation_failure(
+                "DERIVATION_CAPABILITY_BLOCKED",
+                "Scene geometry metadata does not satisfy the point-cloud contract.",
+                "Provide matching pinhole intrinsics, registered alignment, and an "
+                "undistorted source.",
+                capability,
+            )
+        scene_hash_value = scene_hash(
+            {"rgb": scene.rgb.sha256, "depth": scene.depth.sha256},
+            scene,
+            scene.normalizer_version,
+        )
+        key = derivation_key(scene_hash_value, processing, PROCESSOR_VERSION)
+        derivation_id = derivation_id_from_key(key)
+        cached = store.read_cached_derivation(scene_id, key)
+        if cached is not None:
+            return JSONResponse(
+                status_code=200,
+                content=_derivation_payload(
+                    cached.manifest,
+                    cached=True,
+                    capabilities=capabilities,
+                ),
+            )
+        try:
+            manifest, files = _build_derivation_artifacts(
+                store,
+                registry,
+                scene,
+                processing,
+                scene_hash_value,
+                key,
+            )
+            store.publish_derivation(scene_id, key, files)
+            cached = store.read_cached_derivation(scene_id, key)
+            if cached is None:
+                raise ValueError("published derivation could not be read back")
+        except SceneSourceError as exc:
+            return _derivation_failure(
+                exc.code,
+                "Scene source is not current.",
+                "Re-import or re-link the changed source before deriving again.",
+                capability,
+            )
+        except PointCloudProcessingError as exc:
+            return JSONResponse(
+                status_code=422,
+                content={"diagnostics": _diagnostics(list(exc.diagnostics))},
+            )
+        except (OSError, ValueError):
+            return _derivation_failure(
+                "DERIVATION_FAILED",
+                "Point-cloud derivation could not be completed.",
+                "Check the Scene sources and processing parameters, then try again.",
+                capability,
+            )
+        assert cached is not None
+        assert cached.manifest.derivation_id == derivation_id
+        return JSONResponse(
+            status_code=201,
+            content=_derivation_payload(
+                manifest,
+                cached=False,
+                capabilities=capabilities,
+            ),
+        )
+
+    @app.get("/api/v1/derivations/{derivation_id}", dependencies=[Depends(require_session)])
+    async def get_derivation(derivation_id: str) -> JSONResponse:
+        try:
+            found = _find_cached_derivation(store, derivation_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="derivation not found") from exc
+        if found is None:
+            raise HTTPException(status_code=404, detail="derivation not found")
+        scene_id, cached = found
+        stale_response = _stale_cache_response(store, scene_id)
+        if stale_response is not None:
+            return stale_response
+        scene = store.get_scene(scene_id)
+        return JSONResponse(
+            content=_derivation_payload(
+                cached.manifest,
+                cached=True,
+                capabilities=capability_report(scene, []).model_dump(),
+            )
+        )
+
+    @app.get(
+        "/api/v1/derivations/{derivation_id}/pointcloud",
+        dependencies=[Depends(require_session)],
+    )
+    async def derivation_pointcloud(derivation_id: str) -> Response:
+        try:
+            found = _find_cached_derivation(store, derivation_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="derivation not found") from exc
+        if found is None:
+            raise HTTPException(status_code=404, detail="derivation not found")
+        scene_id, cached = found
+        stale_response = _stale_cache_response(store, scene_id)
+        if stale_response is not None:
+            return stale_response
+        return FileResponse(
+            cached.path("pointcloud.bin"),
+            media_type="application/vnd.rgbd-workbench.pointcloud-v1",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get(
+        "/api/v1/derivations/{derivation_id}/export/{format}",
+        dependencies=[Depends(require_session)],
+    )
+    async def derivation_export(derivation_id: str, format: str) -> Response:
+        if format not in {"ply", "json"}:
+            raise HTTPException(status_code=404, detail="export not found")
+        try:
+            found = _find_cached_derivation(store, derivation_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="derivation not found") from exc
+        if found is None:
+            raise HTTPException(status_code=404, detail="derivation not found")
+        scene_id, cached = found
+        stale_response = _stale_cache_response(store, scene_id)
+        if stale_response is not None:
+            return stale_response
+        filename = f"{derivation_id}.{format}"
+        media_type = "application/json" if format == "json" else "application/octet-stream"
+        return FileResponse(
+            cached.path(f"pointcloud.{format}" if format == "ply" else "parameters.json"),
+            media_type=media_type,
+            filename=filename,
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.post("/api/v1/imports", status_code=201, dependencies=[Depends(require_session)])
     async def create_import(

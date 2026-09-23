@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -36,6 +36,29 @@ class DiagnosticResponse(BaseModel):
     @classmethod
     def from_diagnostic(cls, diagnostic: Diagnostic) -> DiagnosticResponse:
         return cls.model_validate(diagnostic.model_dump())
+
+
+class DerivationUrls(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
+        populate_by_name=True,
+    )
+
+    pointcloud: str
+    ply: str
+    json_url: str = Field(alias="json")
+
+
+class DerivationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schema_version: Literal[1]
+    cached: bool
+    derivation: dict[str, Any]
+    urls: DerivationUrls
+    diagnostics: list[DiagnosticResponse]
+    capabilities: dict[str, bool]
 
 
 def redacted_metadata(metadata: dict[str, Any]) -> dict[str, Any]:

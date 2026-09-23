@@ -1,16 +1,34 @@
 import type {
   CapabilitiesResponse,
   ConfirmedImport,
+  DerivationResponse,
   MetadataPayload,
+  ProcessingSpec,
   ProbeResponse,
   SceneSummary,
 } from "./types";
 
+export class ApiError extends Error {
+  diagnostics: import("./types").Diagnostic[];
+
+  constructor(message: string, diagnostics: import("./types").Diagnostic[] = []) {
+    super(message);
+    this.name = "ApiError";
+    this.diagnostics = diagnostics;
+  }
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: "include", ...init });
-  const payload = (await response.json().catch(() => ({}))) as { detail?: string };
+  const payload = (await response.json().catch(() => ({}))) as {
+    detail?: string;
+    diagnostics?: import("./types").Diagnostic[];
+  };
   if (!response.ok) {
-    throw new Error(payload.detail ?? `Request failed (${response.status})`);
+    throw new ApiError(
+      payload.detail ?? `Request failed (${response.status})`,
+      payload.diagnostics ?? [],
+    );
   }
   return payload as T;
 }
@@ -66,4 +84,38 @@ export function getCapabilities(signal?: AbortSignal): Promise<CapabilitiesRespo
 
 export function scenePreviewUrl(sceneId: string, role: "rgb" | "depth"): string {
   return `/api/v1/scenes/${encodeURIComponent(sceneId)}/preview/${role}`;
+}
+
+export function createDerivation(
+  sceneId: string,
+  processing: ProcessingSpec,
+  signal?: AbortSignal,
+): Promise<DerivationResponse> {
+  return request<DerivationResponse>(
+    `/api/v1/scenes/${encodeURIComponent(sceneId)}/derivations`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(processing),
+      signal,
+    },
+  );
+}
+
+export function getDerivation(
+  derivationId: string,
+  signal?: AbortSignal,
+): Promise<DerivationResponse> {
+  return request<DerivationResponse>(
+    `/api/v1/derivations/${encodeURIComponent(derivationId)}`,
+    { signal },
+  );
+}
+
+export function derivationPointcloudUrl(derivationId: string): string {
+  return `/api/v1/derivations/${encodeURIComponent(derivationId)}/pointcloud`;
+}
+
+export function derivationExportUrl(derivationId: string, format: "ply" | "json"): string {
+  return `/api/v1/derivations/${encodeURIComponent(derivationId)}/export/${format}`;
 }

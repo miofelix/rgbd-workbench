@@ -11,6 +11,55 @@ export interface Diagnostic {
   capability: string | null;
 }
 
+export interface ProcessingSpec {
+  schema_version: 1;
+  roi: [number, number, number, number] | null;
+  depth_min: number | null;
+  depth_max: number | null;
+  xyz_min: [number, number, number] | null;
+  xyz_max: [number, number, number] | null;
+  pixel_stride: number;
+  max_points: number;
+  voxel_size: number | null;
+  knn_filter: { k: number; std_ratio: number } | null;
+  knn_smooth: { k: number } | null;
+}
+
+export interface ArrayDescriptor {
+  dtype: "float32" | "uint8" | "uint32";
+  shape: number[];
+  offset: number;
+  nbytes: number;
+}
+
+export interface DerivationManifest {
+  schema_version: 1;
+  derivation_id: string;
+  scene_id: string;
+  scene_hash: string;
+  derivation_key: string;
+  processor_version: string;
+  processing: ProcessingSpec;
+  point_count: number;
+  source_shape: [number, number];
+  frame: string;
+  unit: "m" | "unitless";
+  representation: "z_depth" | "relative_z";
+  bounds: { min: [number, number, number]; max: [number, number, number] };
+  arrays: Record<"positions" | "colors" | "pixel_index", ArrayDescriptor>;
+  diagnostics: Diagnostic[];
+  created_at: string | null;
+}
+
+export interface DerivationResponse {
+  schema_version: 1;
+  cached: boolean;
+  derivation: DerivationManifest;
+  urls: { pointcloud: string; ply: string; json: string };
+  diagnostics: Diagnostic[];
+  capabilities: Record<string, boolean>;
+}
+
 export interface CapabilityReport {
   image_inspection: boolean;
   relative_pointcloud: boolean;
@@ -52,6 +101,7 @@ export interface SceneSummary {
   normalizer_version: string;
   adapter_versions: Record<string, string>;
   capabilities?: CapabilityReport;
+  diagnostics?: Diagnostic[];
 }
 
 export interface ProbeCandidate {

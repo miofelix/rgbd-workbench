@@ -311,7 +311,12 @@ def capability_report(
 
     def blocked(capability: str) -> bool:
         return any(
-            item.severity == "fatal" and item.capability in (None, capability)
+            item.severity == "fatal"
+            and not (
+                item.code == "DEPTH_SEMANTICS_REQUIRED"
+                and manifest.depth_spec is not None
+            )
+            and item.capability in (None, capability)
             for item in all_diagnostics
         )
 
