@@ -16,9 +16,7 @@ def descriptor(dtype: str, shape: tuple[int, ...], offset: int, nbytes: int) -> 
     return ArrayDescriptorV1(dtype=dtype, shape=shape, offset=offset, nbytes=nbytes)
 
 
-def derivation_fixture(
-    *, unit: str = "m", representation: str = "z_depth"
-) -> DerivationManifestV1:
+def derivation_fixture(*, unit: str = "m", representation: str = "z_depth") -> DerivationManifestV1:
     return DerivationManifestV1(
         schema_version=1,
         derivation_id="derivation-" + "a" * 64,

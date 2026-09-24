@@ -5,7 +5,7 @@ confirming its geometry contract, and preparing later point-cloud and camera-pat
 standalone project: it does not require a camera SDK, CUDA, model weights, robot software, or another
 repository.
 
-## What M1 provides
+## What M1 and M2 provide
 
 - Local browser service bound to `127.0.0.1`.
 - Managed browser imports that copy source files into a workspace without modifying the originals.
@@ -15,9 +15,16 @@ repository.
 - Explicit depth semantics for metric `z_depth` and `relative_z` unitless data.
 - RGB/depth dimensions, dtype, invalid values, unit and alignment diagnostics.
 - RGB and depth previews, depth summary, capability gates and a responsive analysis-first shell.
+- Deterministic server-side point-cloud derivations for metric `z_depth` and unitless `relative_z` Scenes.
+- A Three.js point-cloud viewer with stable preview LOD, orbit controls, perspective/orthographic projection,
+  RGB/depth/mono coloring, source-pixel selection and two-point distance measurement.
+- Draft/applied ProcessingSpec controls for ROI, stride, depth/XYZ clipping, voxel reduction, point budgets and
+  optional KNN filtering/smoothing. Processing changes are not sent to the server until the user applies them.
+- Atomic derivation caching keyed by Scene hash, processing parameters and processor version.
+- Binary point-cloud protocol downloads plus binary little-endian PLY and parameter JSON exports. Unitless
+  derivations remain explicitly `unitless` in measurements and exports; they are never relabeled as meters.
 
-Point-cloud processing, Three.js geometry, trajectory editing and video rendering are intentionally
-marked as M2/M3 capabilities in this first milestone.
+Trajectory editing, camera paths, video rendering, SSE jobs and workspace packaging remain M3 capabilities.
 
 ## Install
 
@@ -86,3 +93,12 @@ boundaries. The complete local check is:
 ```bash
 bash scripts/run-m1-checks.sh
 ```
+
+The M2 browser acceptance flow is:
+
+```bash
+npm run test:e2e -- tests/e2e/m1-import.spec.ts tests/e2e/m2-pointcloud.spec.ts
+```
+
+Apply processing before measuring or exporting. Export links always refer to the current applied derivation;
+changing draft parameters alone does not invalidate or silently replace an existing derivation.
