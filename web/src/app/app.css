@@ -84,6 +84,7 @@ h2, h3, p { margin: 0; }
 .file-drop input, .manifest-picker input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
 .manifest-picker { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 8px 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; background: #fff; font-size: 10px; cursor: pointer; }
 .manifest-picker::after { content: "选择 JSON / YAML"; color: var(--teal); font-weight: 700; }
+.manifest-hint { margin-top: 6px; color: var(--muted); font-size: 9px; line-height: 1.45; }
 .inline-status { display: flex; align-items: center; gap: 7px; margin-top: 10px; color: var(--muted); font-size: 11px; }
 .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -104,11 +105,17 @@ h2, h3, p { margin: 0; }
 .semantic-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 9px; margin-top: 12px; }
 .semantic-grid label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; }
 .semantic-grid input, .semantic-grid select { width: 100%; min-height: 32px; padding: 0 8px; color: var(--ink); border: 1px solid #b8c5c9; border-radius: 3px; background: #fff; font-size: 11px; }
+.semantic-grid label.field-invalid { color: #8b302f; }
+.semantic-grid label.field-invalid select { border-color: #c56c68; background: #fff7f6; }
+.field-hint { margin-top: 8px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.field-hint.error { color: #8b302f; }
 .camera-fields { margin: 12px 0 0; padding: 10px; border: 1px solid var(--line); border-radius: 4px; }
 .camera-fields legend { padding: 0 5px; color: var(--muted); font-size: 10px; font-weight: 700; }
 .camera-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 7px; }
 .camera-grid label { display: grid; gap: 4px; color: var(--muted); font-size: 9px; }
 .camera-grid input { width: 100%; min-height: 29px; padding: 0 6px; border: 1px solid #b8c5c9; border-radius: 3px; font-size: 10px; }
+.camera-distortion { display: grid; gap: 4px; max-width: 220px; margin-top: 9px; color: var(--muted); font-size: 9px; }
+.camera-distortion select { min-height: 29px; padding: 0 6px; color: var(--ink); border: 1px solid #b8c5c9; border-radius: 3px; background: #fff; font-size: 10px; }
 .orientation-check { display: flex; align-items: center; gap: 7px; margin-top: 10px; color: var(--muted); font-size: 10px; }
 .orientation-check input { accent-color: var(--teal); }
 .wizard-actions { justify-content: flex-end; gap: 8px; margin-top: 13px; }

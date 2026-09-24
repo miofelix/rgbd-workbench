@@ -84,6 +84,13 @@ Missing semantics leave two-dimensional inspection available but disable geometr
 Metric point-cloud capability additionally requires equal RGB/depth dimensions, registered-to-RGB
 alignment, pinhole intrinsics, and an undistorted input. The application never guesses these values.
 
+The import manifest uses the project-owned v1 shape shown in
+[`docs/manifest-v1.example.json`](docs/manifest-v1.example.json). `depth.representation` and either
+`depth.unit` or `depth.scale_to_meter` are explicit semantic declarations; `camera` and `alignment`
+are explicit geometry declarations. A producer with a different metadata format must convert it to
+this shape before import. The workbench does not interpret producer-specific sidecars, filenames, or
+numeric ranges as a manifest.
+
 ## Workspace safety
 
 Source files and published exports are read-only from the application's perspective. Imports stage and

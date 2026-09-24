@@ -95,6 +95,30 @@ def _diagnostics(items: list[Diagnostic]) -> list[dict[str, Any]]:
     return [DiagnosticResponse.from_diagnostic(item).model_dump() for item in items]
 
 
+def _effective_diagnostics(
+    scene: SceneManifestV1,
+    diagnostics: list[Diagnostic] | tuple[Diagnostic, ...],
+) -> list[Diagnostic]:
+    effective: list[Diagnostic] = []
+    seen: set[tuple[str, str, str | None, str, str | None, str | None]] = set()
+    for item in diagnostics:
+        if item.code == "DEPTH_SEMANTICS_REQUIRED" and scene.depth_spec is not None:
+            continue
+        identity = (
+            item.code,
+            item.severity,
+            item.field,
+            item.message,
+            item.hint,
+            item.capability,
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        effective.append(item)
+    return effective
+
+
 def _source_summary(source: SourceRef) -> dict[str, Any]:
     return {
         "source_id": source.source_id,
@@ -112,7 +136,10 @@ def _scene_summary(
     scene: SceneManifestV1,
     diagnostics: list[Diagnostic] | tuple[Diagnostic, ...] = (),
 ) -> dict[str, Any]:
-    effective_diagnostics = list(scene.diagnostics) + list(diagnostics)
+    effective_diagnostics = _effective_diagnostics(
+        scene,
+        [*scene.diagnostics, *diagnostics],
+    )
     report = capability_report(scene, effective_diagnostics)
     return {
         "schema_version": scene.schema_version,
@@ -132,12 +159,18 @@ def _scene_summary(
     }
 
 
-def _candidate_summary(candidate: ProbeCandidate) -> dict[str, Any]:
+def _candidate_summary(
+    candidate: ProbeCandidate,
+    scene: SceneManifestV1 | None = None,
+) -> dict[str, Any]:
+    diagnostics = candidate.diagnostics
+    if scene is not None:
+        diagnostics = _effective_diagnostics(scene, diagnostics)
     return {
         "role": candidate.role,
         "source": _source_summary(candidate.source),
         "metadata": redacted_metadata(candidate.metadata),
-        "diagnostics": _diagnostics(candidate.diagnostics),
+        "diagnostics": _diagnostics(diagnostics),
     }
 
 
@@ -543,6 +576,7 @@ def seed_import_from_paths(
     session.diagnostics.extend(
         item for candidate in candidates.values() for item in candidate.diagnostics
     )
+    session.diagnostics = _effective_diagnostics(session.scene, session.diagnostics)
     session.scene = session.scene.model_copy(update={"diagnostics": session.diagnostics})
     application.state.imports[import_id] = session
     return import_id
@@ -892,6 +926,7 @@ def create_app(
             session.diagnostics.extend(
                 item for candidate in candidates.values() for item in candidate.diagnostics
             )
+            session.diagnostics = _effective_diagnostics(session.scene, session.diagnostics)
             session.scene = session.scene.model_copy(update={"diagnostics": session.diagnostics})
             imports[import_id] = session
             report = capability_report(session.scene, session.diagnostics)
@@ -901,12 +936,15 @@ def create_app(
                     "schema_version": 1,
                     "import_id": import_id,
                     "candidates": {
-                        role: _candidate_summary(candidate)
+                        role: _candidate_summary(candidate, session.scene)
                         for role, candidate in candidates.items()
                     },
                     "manifest": (
-                        _candidate_summary(manifest_candidate) if manifest_candidate else None
+                        _candidate_summary(manifest_candidate, session.scene)
+                        if manifest_candidate
+                        else None
                     ),
+                    "scene": _scene_summary(session.scene, session.diagnostics),
                     "diagnostics": _diagnostics(session.diagnostics),
                     "capabilities": report.model_dump(),
                 },
@@ -931,11 +969,11 @@ def create_app(
             "schema_version": 1,
             "import_id": import_id,
             "candidates": {
-                role: _candidate_summary(candidate)
+                role: _candidate_summary(candidate, session.scene)
                 for role, candidate in session.candidates.items()
             },
             "manifest": (
-                _candidate_summary(session.manifest_candidate)
+                _candidate_summary(session.manifest_candidate, session.scene)
                 if session.manifest_candidate
                 else None
             ),
@@ -973,6 +1011,7 @@ def create_app(
         session.diagnostics.extend(
             item for candidate in session.candidates.values() for item in candidate.diagnostics
         )
+        session.diagnostics = _effective_diagnostics(session.scene, session.diagnostics)
         session.scene = session.scene.model_copy(update={"diagnostics": session.diagnostics})
         report = capability_report(session.scene, session.diagnostics)
         return JSONResponse(
@@ -981,11 +1020,11 @@ def create_app(
                 "import_id": import_id,
                 "scene": _scene_summary(session.scene, session.diagnostics),
                 "candidates": {
-                    role: _candidate_summary(candidate)
+                    role: _candidate_summary(candidate, session.scene)
                     for role, candidate in session.candidates.items()
                 },
                 "manifest": (
-                    _candidate_summary(session.manifest_candidate)
+                    _candidate_summary(session.manifest_candidate, session.scene)
                     if session.manifest_candidate
                     else None
                 ),

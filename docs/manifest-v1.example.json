@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "display_name": "Desk sample",
+  "depth": {
+    "representation": "z_depth",
+    "unit": "m",
+    "invalid_values": [0]
+  },
+  "camera": {
+    "model": "pinhole",
+    "width": 640,
+    "height": 480,
+    "fx": 487.6347351074219,
+    "fy": 487.6347351074219,
+    "cx": 314.6842956542969,
+    "cy": 217.43350219726562,
+    "distortion_model": "none"
+  },
+  "alignment": {
+    "state": "registered_to_rgb"
+  }
+}

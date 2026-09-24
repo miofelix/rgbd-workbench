@@ -271,6 +271,33 @@ def test_manifest_upload_supplies_semantics_and_commits(tmp_path: Path):
     assert committed.json()["scene"]["depth_spec"]["unit"] == "mm"
 
 
+def test_confirmed_depth_semantics_clear_probe_gate_diagnostics(tmp_path: Path):
+    test_client = client(tmp_path)
+    test_client.cookies.set("rgbd_session", test_client.app.state.session_cookie)
+    created = test_client.post(
+        "/api/v1/imports",
+        files={
+            "rgb": ("color.png", png_bytes(), "image/png"),
+            "depth": ("depth.npy", depth_bytes(), "application/octet-stream"),
+        },
+    )
+    assert created.status_code == 201
+    import_id = created.json()["import_id"]
+    assert any(item["code"] == "DEPTH_SEMANTICS_REQUIRED" for item in created.json()["diagnostics"])
+
+    confirmed = test_client.put(
+        f"/api/v1/imports/{import_id}/metadata",
+        json={"representation": "z_depth", "unit": "m"},
+    )
+    assert confirmed.status_code == 200
+    payload = confirmed.json()
+    assert not any(item["code"] == "DEPTH_SEMANTICS_REQUIRED" for item in payload["diagnostics"])
+    assert not any(
+        item["code"] == "DEPTH_SEMANTICS_REQUIRED"
+        for item in payload["candidates"]["depth"]["diagnostics"]
+    )
+
+
 def test_orientation_confirmation_does_not_override_geometry_gate(tmp_path: Path):
     test_client = client(tmp_path)
     test_client.cookies.set("rgbd_session", test_client.app.state.session_cookie)

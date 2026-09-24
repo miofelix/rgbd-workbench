@@ -107,8 +107,17 @@ export interface SceneSummary {
   rgb: SourceSummary;
   depth: SourceSummary;
   depth_spec: DepthSpec | null;
-  camera: { model?: string; width?: number; height?: number } | null;
-  alignment: { state?: string } | null;
+  camera: {
+    model?: string;
+    width?: number;
+    height?: number;
+    fx?: number | null;
+    fy?: number | null;
+    cx?: number | null;
+    cy?: number | null;
+    distortion_model?: "none" | "unknown";
+  } | null;
+  alignment: { state?: string; method?: string | null } | null;
   frame_id: string;
   coordinate_convention: string;
   normalizer_version: string;
@@ -129,12 +138,13 @@ export interface ProbeResponse {
   import_id: string;
   candidates: Record<string, ProbeCandidate>;
   manifest: ProbeCandidate | null;
+  scene?: SceneSummary | null;
   diagnostics: Diagnostic[];
   capabilities: CapabilityReport;
 }
 
 export interface ConfirmedImport extends ProbeResponse {
-  scene: SceneSummary;
+  scene?: SceneSummary | null;
 }
 
 export interface MetadataPayload {

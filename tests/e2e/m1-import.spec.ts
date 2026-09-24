@@ -52,6 +52,9 @@ test("M1 imports a unitless RGB-D pair and commits a Scene", async ({
   await page.getByLabel("深度表示").selectOption("relative_z");
   await page.getByLabel("单位").selectOption("unitless");
   await page.getByRole("button", { name: "确认参数" }).click();
+  await expect(
+    page.getByLabel("导入诊断").getByText("DEPTH_SEMANTICS_REQUIRED"),
+  ).toHaveCount(0);
   await expect(page.getByText("相对点云")).toBeVisible();
   await page.getByRole("button", { name: "保存 Scene" }).click();
   await expect(

@@ -15,5 +15,6 @@ test-results/
 *.egg-info/
 *.tsbuildinfo
 .env
+/logs/
 /workspace/
 *.rgbdw
