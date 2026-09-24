@@ -3,7 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { forwardRef, useImperativeHandle } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DerivationResponse, SceneSummary } from "../../web/src/api/types";
+import type {
+  DerivationResponse,
+  SceneSummary,
+  SelectedPoint,
+} from "../../web/src/api/types";
 import { derivationResponse } from "./pointcloud-fixtures";
 
 const apiMocks = vi.hoisted(() => ({
@@ -21,10 +25,12 @@ vi.mock("../../web/src/features/pointcloud/PointCloudViewer", () => ({
   PointCloudViewer: forwardRef(function MockViewer(
     {
       onPointSelected,
+      selectedPoints = [],
       viewSpec,
       onViewSpecChange,
     }: {
-      onPointSelected: (point: object) => void;
+      onPointSelected: (point: SelectedPoint) => void;
+      selectedPoints: SelectedPoint[];
       viewSpec: { projection: string; colorMode: string; pointSize: number };
       onViewSpecChange: (patch: object) => void;
     },
@@ -33,9 +39,17 @@ vi.mock("../../web/src/features/pointcloud/PointCloudViewer", () => ({
     useImperativeHandle(ref, () => ({
       capturePng: () => "data:image/png;base64,fixture",
       resetView: vi.fn(),
+      selectPixel: (pixelIndex: number) => ({
+        pixelIndex: pixelIndex === 3 ? 1 : pixelIndex,
+        position: pixelIndex === 3 ? [0, 0.3, 1.4] : [0, 0, 1],
+        unit: "unitless",
+      }),
     }));
     return (
       <div data-testid="pointcloud-canvas">
+        <output data-testid="viewer-selected-pixels">
+          {selectedPoints.map((point) => point.pixelIndex).join(",")}
+        </output>
         <button
           type="button"
           aria-label="正交投影"
@@ -243,6 +257,40 @@ describe("point-cloud analysis workflow", () => {
     await user.click(screen.getByRole("button", { name: "下载 PNG" }));
     expect(clickSpy).toHaveBeenCalled();
     clickSpy.mockRestore();
+  });
+
+  it("links image pixels and point-cloud selections in both directions", async () => {
+    await useWorkbenchStore
+      .getState()
+      .applyProcessing(async () => unitlessResponse());
+    render(<SceneInspector scene={unitlessScene()} mode="compare" />);
+    const rgbImage = screen.getByRole("button", {
+      name: "在 RGB 输入中选择像素",
+    });
+    vi.spyOn(rgbImage, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 100,
+      bottom: 100,
+      width: 100,
+      height: 100,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.click(rgbImage, { clientX: 75, clientY: 75 });
+
+    expect(screen.getByTestId("viewer-selected-pixels")).toHaveTextContent("1");
+    expect(screen.getAllByTestId("selection-marker-1")).toHaveLength(2);
+
+    await userEvent.click(screen.getByRole("button", { name: "选择测试点 A" }));
+
+    expect(screen.getByTestId("viewer-selected-pixels")).toHaveTextContent(
+      "1,0",
+    );
+    expect(screen.getAllByTestId("selection-marker-0")).toHaveLength(2);
+    expect(screen.getByTestId("measurement-distance")).toBeVisible();
   });
 
   it("keeps geometry controls disabled when the Scene has no point-cloud capability", () => {

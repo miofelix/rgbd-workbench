@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Literal
 
@@ -17,6 +18,8 @@ from rgbd_workbench.domain.diagnostics import Diagnostic
 
 PointUnit = Literal["m", "unitless"]
 PointRepresentation = Literal["z_depth", "relative_z"]
+_MAX_NEIGHBOR_WORK_ITEMS = 16_000_000
+_MAX_NEIGHBOR_QUERY_ITEMS_PER_BATCH = 262_144
 
 
 class PointCloudProcessingError(ValueError):
@@ -115,29 +118,77 @@ def _validate_inputs(
     return representation, unit
 
 
-def _ordered_neighbors(points: np.ndarray, k: int, *, include_self: bool) -> np.ndarray:
+def _neighbor_query_width(count: int, k: int, *, include_self: bool) -> int:
+    if count <= 1:
+        return 0
+    requested = min(max(1, k), count if include_self else count - 1)
+    return min(count, requested + (0 if include_self else 1))
+
+
+def validate_neighbor_work_budget(point_count: int, processing: ProcessingSpecV1) -> None:
+    filter_width = (
+        _neighbor_query_width(point_count, processing.knn_filter.k, include_self=False)
+        if processing.knn_filter is not None and point_count > 2
+        else 0
+    )
+    smooth_width = (
+        _neighbor_query_width(point_count, processing.knn_smooth.k, include_self=True)
+        if processing.knn_smooth is not None and point_count > 1
+        else 0
+    )
+    work_items = point_count * (filter_width + smooth_width)
+    if work_items > _MAX_NEIGHBOR_WORK_ITEMS:
+        raise PointCloudProcessingError(
+            [
+                Diagnostic(
+                    code="DERIVATION_RESOURCE_LIMIT",
+                    severity="fatal",
+                    field="processing.knn",
+                    message="The requested neighbor processing exceeds the memory/work budget.",
+                    hint="Reduce max points or the KNN neighborhood sizes, then try again.",
+                    capability=None,
+                )
+            ]
+        )
+
+
+def _ordered_neighbor_batches(
+    points: np.ndarray,
+    k: int,
+    *,
+    include_self: bool,
+) -> Iterator[tuple[int, int, np.ndarray, np.ndarray]]:
     count = points.shape[0]
     if count <= 1:
-        return np.empty((count, 0), dtype=np.int64)
+        return
     requested = min(max(1, k), count if include_self else count - 1)
-    query_count = min(count, requested + (0 if include_self else 1))
-    distances, indices = cKDTree(points.astype(np.float64, copy=False)).query(points, k=query_count)
-    if query_count == 1:
-        distances = distances[:, None]
-        indices = indices[:, None]
-    ordered = np.empty((count, requested), dtype=np.int64)
-    for row in range(count):
-        pairs = sorted(
-            (
-                (float(distance), int(index))
-                for distance, index in zip(distances[row], indices[row], strict=True)
-            ),
-            key=lambda item: (item[0], item[1]),
-        )
-        if not include_self:
-            pairs = [pair for pair in pairs if pair[1] != row]
-        ordered[row] = np.asarray([index for _, index in pairs[:requested]], dtype=np.int64)
-    return ordered
+    query_width = _neighbor_query_width(count, k, include_self=include_self)
+    batch_size = max(1, _MAX_NEIGHBOR_QUERY_ITEMS_PER_BATCH // query_width)
+    query_points = points.astype(np.float64, copy=False)
+    tree = cKDTree(query_points)
+    for start in range(0, count, batch_size):
+        end = min(count, start + batch_size)
+        distances, indices = tree.query(query_points[start:end], k=query_width)
+        if query_width == 1:
+            distances = distances[:, None]
+            indices = indices[:, None]
+        ordered_distances = np.empty((end - start, requested), dtype=np.float64)
+        ordered_indices = np.empty((end - start, requested), dtype=np.int64)
+        for local_row in range(end - start):
+            source_row = start + local_row
+            pairs = sorted(
+                (
+                    (float(distance), int(index))
+                    for distance, index in zip(
+                        distances[local_row], indices[local_row], strict=True
+                    )
+                    if include_self or int(index) != source_row
+                ),
+                key=lambda item: (item[0], item[1]),
+            )[:requested]
+            ordered_distances[local_row] = [distance for distance, _ in pairs]
+            ordered_indices[local_row] = [index for _, index in pairs]
+        yield start, end, ordered_distances, ordered_indices
 
 
 def _apply_voxel(
@@ -203,13 +254,11 @@ def _apply_knn_filter(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     if positions.shape[0] <= 2:
         return positions, colors, pixel_index
-    neighbors = _ordered_neighbors(positions, k, include_self=False)
-    distances = np.linalg.norm(
-        positions[:, None, :].astype(np.float64) - positions[neighbors].astype(np.float64),
-        axis=2,
-    )
-    mean = distances.mean(axis=1)
-    spread = distances.std(axis=1)
+    mean = np.empty(positions.shape[0], dtype=np.float64)
+    spread = np.empty(positions.shape[0], dtype=np.float64)
+    for start, end, distances, _ in _ordered_neighbor_batches(positions, k, include_self=False):
+        mean[start:end] = distances.mean(axis=1)
+        spread[start:end] = distances.std(axis=1)
     keep = mean <= (mean.mean() + float(std_ratio) * max(float(spread.mean()), 1e-12))
     return positions[keep], colors[keep], pixel_index[keep]
 
@@ -222,8 +271,10 @@ def _apply_knn_smooth(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     if positions.shape[0] <= 1:
         return positions, colors, pixel_index
-    neighbors = _ordered_neighbors(positions, k, include_self=True)
-    smoothed = positions[neighbors].astype(np.float64).mean(axis=1).astype(np.float32)
+    source = positions.astype(np.float64, copy=False)
+    smoothed = np.empty_like(positions, dtype=np.float32)
+    for start, end, _, neighbors in _ordered_neighbor_batches(positions, k, include_self=True):
+        smoothed[start:end] = source[neighbors].mean(axis=1, dtype=np.float64)
     return np.ascontiguousarray(smoothed), colors, pixel_index
 
 
@@ -306,6 +357,7 @@ def build_derivation(
     positions, colors, source_pixels = _apply_budget(
         positions, colors, source_pixels, processing.max_points
     )
+    validate_neighbor_work_budget(positions.shape[0], processing)
     if processing.knn_filter is not None:
         positions, colors, source_pixels = _apply_knn_filter(
             positions,

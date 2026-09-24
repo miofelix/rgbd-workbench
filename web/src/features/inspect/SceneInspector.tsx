@@ -12,6 +12,7 @@ import {
 } from "../pointcloud/PointCloudViewer";
 import { ProcessingPanel } from "../pointcloud/ProcessingPanel";
 import { DepthPreview } from "./DepthPreview";
+import { LinkedImagePreview } from "./LinkedImagePreview";
 import { StatisticsPanel } from "./StatisticsPanel";
 
 interface SceneInspectorProps {
@@ -61,10 +62,15 @@ export function SceneInspector({
         ref={viewerRef}
         pointcloudUrl={currentUrls.pointcloud}
         onPointSelected={selectPoint}
+        selectedPoints={selectedPoints}
         viewSpec={viewSpec}
         onViewSpecChange={setViewSpec}
       />
     ) : null;
+  const selectImagePixel = (pixelIndex: number): void => {
+    const selected = viewerRef.current?.selectPixel(pixelIndex);
+    if (selected) selectPoint(selected);
+  };
 
   return (
     <div className="scene-inspector">
@@ -182,9 +188,13 @@ export function SceneInspector({
                     </span>
                   </div>
                   <div className="compare-media">
-                    <img
+                    <LinkedImagePreview
                       src={scenePreviewUrl(scene.scene_id, "rgb")}
                       alt="RGB 输入"
+                      sourceWidth={scene.rgb.width ?? sourceWidth}
+                      sourceHeight={scene.rgb.height ?? sourceHeight}
+                      selectedPoints={selectedPoints}
+                      onPixelSelected={selectImagePixel}
                     />
                   </div>
                 </section>
@@ -194,9 +204,13 @@ export function SceneInspector({
                     <span className="muted">{scene.depth_spec?.unit}</span>
                   </div>
                   <div className="compare-media">
-                    <img
+                    <LinkedImagePreview
                       src={scenePreviewUrl(scene.scene_id, "depth")}
                       alt="深度输入"
+                      sourceWidth={sourceWidth}
+                      sourceHeight={sourceHeight}
+                      selectedPoints={selectedPoints}
+                      onPixelSelected={selectImagePixel}
                     />
                   </div>
                 </section>

@@ -188,12 +188,16 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
         get().activeSceneId !== sceneId
       )
         return;
+      const derivationChanged =
+        get().appliedDerivation?.derivation_id !==
+        response.derivation.derivation_id;
       set({
         appliedProcessing: processing,
         appliedDerivation: response.derivation,
         appliedDerivationUrls: response.urls,
         derivationCached: response.cached,
         diagnostics: response.diagnostics,
+        ...(derivationChanged ? { selectedPoints: [] } : {}),
       });
     } catch (cause) {
       if (

@@ -13,11 +13,65 @@ export interface PointCloudSceneOptions {
 
 export interface PointCloudSceneHandle {
   setPoints: (data: ParsedPointCloud) => void;
+  setSelectedPoints: (points: readonly SelectedPoint[]) => void;
   setViewSpec: (view: ViewSpec) => void;
   resetView: () => void;
   pick: (clientX: number, clientY: number) => SelectedPoint | null;
+  selectPixel: (pixelIndex: number) => SelectedPoint | null;
   capturePng: () => string;
   dispose: () => void;
+}
+
+export function setNormalizedColorBytes(
+  attribute: THREE.BufferAttribute,
+  index: number,
+  color: [number, number, number],
+): void {
+  attribute.setXYZ(index, color[0] / 255, color[1] / 255, color[2] / 255);
+}
+
+export function selectedPointForPixel(
+  data: ParsedPointCloud,
+  pixelIndex: number,
+): SelectedPoint | null {
+  const [height, width] = data.manifest.source_shape;
+  if (
+    !Number.isSafeInteger(pixelIndex) ||
+    pixelIndex < 0 ||
+    pixelIndex >= width * height
+  ) {
+    return null;
+  }
+  const targetX = pixelIndex % width;
+  const targetY = Math.floor(pixelIndex / width);
+  let bestSource = -1;
+  let bestPixel = Number.MAX_SAFE_INTEGER;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let source = 0; source < data.pixelIndex.length; source += 1) {
+    const representative = data.pixelIndex[source];
+    if (representative >= width * height) continue;
+    const x = representative % width;
+    const y = Math.floor(representative / width);
+    const distance = (x - targetX) ** 2 + (y - targetY) ** 2;
+    if (
+      distance < bestDistance ||
+      (distance === bestDistance && representative < bestPixel)
+    ) {
+      bestSource = source;
+      bestPixel = representative;
+      bestDistance = distance;
+    }
+  }
+  if (bestSource < 0) return null;
+  return {
+    pixelIndex: bestPixel,
+    position: [
+      data.positions[bestSource * 3],
+      data.positions[bestSource * 3 + 1],
+      data.positions[bestSource * 3 + 2],
+    ],
+    unit: data.manifest.unit,
+  };
 }
 
 export function createPointCloudScene(
@@ -58,7 +112,9 @@ export function createPointCloudScene(
   raycaster.params.Points = { threshold: 0.02 };
   const pointer = new THREE.Vector2();
   let points: THREE.Points | null = null;
+  let selectionPoints: THREE.Points | null = null;
   let parsed: ParsedPointCloud | null = null;
+  let selectedPoints: readonly SelectedPoint[] = [];
   let disposed = false;
 
   const resize = (): void => {
@@ -76,7 +132,57 @@ export function createPointCloudScene(
     orthographicCamera.updateProjectionMatrix();
   };
 
+  const disposeSelectionPoints = (): void => {
+    if (selectionPoints === null) return;
+    scene.remove(selectionPoints);
+    selectionPoints.geometry.dispose();
+    (selectionPoints.material as THREE.Material).dispose();
+    selectionPoints = null;
+  };
+
+  const updateSelectionPoints = (): void => {
+    disposeSelectionPoints();
+    if (parsed === null || selectedPoints.length === 0) return;
+    const positions: number[] = [];
+    const colors: number[] = [];
+    const selectionColors = [
+      [1, 0.72, 0.12],
+      [0.18, 0.85, 1],
+    ];
+    selectedPoints.slice(0, 2).forEach((selected, selectionIndex) => {
+      const source = parsed?.pixelIndex.indexOf(selected.pixelIndex) ?? -1;
+      if (source < 0 || parsed === null) return;
+      positions.push(
+        parsed.positions[source * 3],
+        -parsed.positions[source * 3 + 1],
+        -parsed.positions[source * 3 + 2],
+      );
+      colors.push(...selectionColors[selectionIndex]);
+    });
+    if (positions.length === 0) return;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(positions), 3),
+    );
+    geometry.setAttribute(
+      "color",
+      new THREE.BufferAttribute(new Float32Array(colors), 3),
+    );
+    const material = new THREE.PointsMaterial({
+      size: 10,
+      sizeAttenuation: false,
+      vertexColors: true,
+      depthTest: false,
+      depthWrite: false,
+    });
+    selectionPoints = new THREE.Points(geometry, material);
+    selectionPoints.renderOrder = 10;
+    scene.add(selectionPoints);
+  };
+
   const disposePoints = (): void => {
+    disposeSelectionPoints();
     if (points === null) return;
     scene.remove(points);
     points.geometry.dispose();
@@ -156,7 +262,7 @@ export function createPointCloudScene(
       } else {
         color = [205, 214, 216];
       }
-      colors.setXYZ(index, color[0], color[1], color[2]);
+      setNormalizedColorBytes(colors, index, color);
     }
     colors.needsUpdate = true;
   };
@@ -206,7 +312,13 @@ export function createPointCloudScene(
     points = new THREE.Points(geometry, material);
     scene.add(points);
     updatePointStyle();
+    updateSelectionPoints();
     resetView();
+  };
+
+  const setSelectedPoints = (next: readonly SelectedPoint[]): void => {
+    selectedPoints = [...next];
+    updateSelectionPoints();
   };
 
   const pick = (clientX: number, clientY: number): SelectedPoint | null => {
@@ -243,9 +355,12 @@ export function createPointCloudScene(
 
   return {
     setPoints,
+    setSelectedPoints,
     setViewSpec,
     resetView,
     pick,
+    selectPixel: (pixelIndex) =>
+      parsed === null ? null : selectedPointForPixel(parsed, pixelIndex),
     capturePng: () => canvas.toDataURL("image/png"),
     dispose: () => {
       if (disposed) return;

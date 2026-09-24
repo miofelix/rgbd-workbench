@@ -218,6 +218,13 @@ h2, h3, p { margin: 0; }
 .compare-tile { min-width: 0; overflow: hidden; }
 .compare-media { display: grid; place-items: center; min-height: 270px; margin-top: 9px; overflow: hidden; background: var(--deep); aspect-ratio: 16 / 10; }
 .compare-media img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.linked-image-preview { position: relative; display: block; width: 100%; height: 100%; min-height: 270px; padding: 0; overflow: hidden; color: inherit; border: 0; background: var(--deep); }
+.linked-image-preview img { pointer-events: none; }
+.image-selection-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.image-selection-marker circle { fill: rgba(255, 184, 31, 0.3); stroke: #ffe096; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.image-selection-marker line { stroke: #fff5d2; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.image-selection-marker.marker-2 circle { fill: rgba(54, 210, 240, 0.3); stroke: #88ecff; }
+.image-selection-marker.marker-2 line { stroke: #d9faff; }
 .compare-viewer-tile .pointcloud-viewer canvas { min-height: 270px; }
 .compare-summary-tile .stats-grid { grid-template-columns: repeat(2, 1fr); }
 .compare-summary-tile .measurement-panel { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }

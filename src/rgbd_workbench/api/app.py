@@ -4,15 +4,17 @@ import io
 import mimetypes
 import re
 import secrets
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 import numpy as np
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from PIL import Image
+from pydantic import ValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from rgbd_workbench import APP_VERSION
@@ -182,6 +184,29 @@ def _derivation_failure(
     return JSONResponse(status_code=422, content={"diagnostics": _diagnostics([diagnostic])})
 
 
+def _processing_spec_from_request(payload: dict[str, Any]) -> ProcessingSpecV1:
+    normalized = dict(payload)
+    for field_name in ("roi", "xyz_min", "xyz_max"):
+        value = normalized.get(field_name)
+        if isinstance(value, list):
+            normalized[field_name] = tuple(value)
+    return ProcessingSpecV1.model_validate(normalized)
+
+
+def _processing_validation_failure(error: ValidationError) -> JSONResponse:
+    first_error = error.errors()[0] if error.errors() else {"loc": ()}
+    location = ".".join(str(part) for part in first_error.get("loc", ()))
+    diagnostic = Diagnostic(
+        code="PROCESSING_SPEC_INVALID",
+        severity="fatal",
+        field=f"processing.{location}" if location else "processing",
+        message="Point-cloud processing parameters are invalid.",
+        hint="Correct the highlighted processing value and try again.",
+        capability=None,
+    )
+    return JSONResponse(status_code=422, content={"diagnostics": _diagnostics([diagnostic])})
+
+
 def _derivation_key_from_id(derivation_id: str) -> str:
     match = _DERIVATION_ID.fullmatch(derivation_id)
     if match is None:
@@ -216,26 +241,31 @@ def _build_derivation_artifacts(
     derivation_key_value: str,
 ) -> tuple[DerivationManifestV1, dict[str, bytes]]:
     try:
-        rgb_path = store.resolve_scene_source(scene.scene_id, "rgb")
-        depth_path = store.resolve_scene_source(scene.scene_id, "depth")
-        rgb_candidate = registry.probe(rgb_path, "rgb")
-        depth_candidate = registry.probe(
-            depth_path,
-            "depth",
-            raw_descriptor=scene.raw_descriptor.model_dump() if scene.raw_descriptor else None,
-        )
-        fatal_probe = [
-            item
-            for candidate in (rgb_candidate, depth_candidate)
-            for item in candidate.diagnostics
-            if item.severity == "fatal"
-            and not (item.code == "DEPTH_SEMANTICS_REQUIRED" and scene.depth_spec is not None)
-        ]
-        if fatal_probe:
-            raise PointCloudProcessingError(fatal_probe)
-        rgb = registry.load_rgb(rgb_candidate)
-        normalized_depth = registry.normalize(depth_candidate, scene)
-        result = build_derivation(scene, rgb, normalized_depth, processing)
+        with tempfile.TemporaryDirectory(
+            prefix=".derivation-snapshot-",
+            dir=store.paths.staging,
+        ) as snapshot_name:
+            snapshot_dir = Path(snapshot_name)
+            rgb_path = store.snapshot_scene_source(scene.scene_id, "rgb", snapshot_dir)
+            depth_path = store.snapshot_scene_source(scene.scene_id, "depth", snapshot_dir)
+            rgb_candidate = registry.probe(rgb_path, "rgb")
+            depth_candidate = registry.probe(
+                depth_path,
+                "depth",
+                raw_descriptor=scene.raw_descriptor.model_dump() if scene.raw_descriptor else None,
+            )
+            fatal_probe = [
+                item
+                for candidate in (rgb_candidate, depth_candidate)
+                for item in candidate.diagnostics
+                if item.severity == "fatal"
+                and not (item.code == "DEPTH_SEMANTICS_REQUIRED" and scene.depth_spec is not None)
+            ]
+            if fatal_probe:
+                raise PointCloudProcessingError(fatal_probe)
+            rgb = registry.load_rgb(rgb_candidate)
+            normalized_depth = registry.normalize(depth_candidate, scene)
+            result = build_derivation(scene, rgb, normalized_depth, processing)
     except SceneSourceError:
         raise
     except PointCloudProcessingError:
@@ -648,8 +678,12 @@ def create_app(
     )
     async def create_derivation(
         scene_id: str,
-        processing: ProcessingSpecV1,
+        processing_payload: dict[str, Any] = Body(...),
     ) -> JSONResponse:
+        try:
+            processing = _processing_spec_from_request(processing_payload)
+        except ValidationError as exc:
+            return _processing_validation_failure(exc)
         try:
             scene = store.get_scene(scene_id)
         except (ValueError, FileNotFoundError) as exc:

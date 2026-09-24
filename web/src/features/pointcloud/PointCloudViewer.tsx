@@ -14,11 +14,13 @@ import { parsePointCloudPayload } from "./pointcloud-protocol";
 export interface PointCloudViewerHandle {
   capturePng: () => string | null;
   resetView: () => void;
+  selectPixel: (pixelIndex: number) => SelectedPoint | null;
 }
 
 interface PointCloudViewerProps {
   pointcloudUrl: string;
   onPointSelected: (point: SelectedPoint) => void;
+  selectedPoints?: readonly SelectedPoint[];
   viewSpec?: ViewSpec;
   onViewSpecChange?: (patch: Partial<ViewSpec>) => void;
 }
@@ -37,6 +39,7 @@ export const PointCloudViewer = forwardRef<
   {
     pointcloudUrl,
     onPointSelected,
+    selectedPoints = [],
     viewSpec = DEFAULT_VIEW_SPEC,
     onViewSpecChange,
   },
@@ -45,6 +48,7 @@ export const PointCloudViewer = forwardRef<
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<PointCloudSceneHandle | null>(null);
   const latestViewSpec = useRef(viewSpec);
+  const latestSelectedPoints = useRef(selectedPoints);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -53,6 +57,8 @@ export const PointCloudViewer = forwardRef<
     () => ({
       capturePng: () => sceneRef.current?.capturePng() ?? null,
       resetView: () => sceneRef.current?.resetView(),
+      selectPixel: (pixelIndex) =>
+        sceneRef.current?.selectPixel(pixelIndex) ?? null,
     }),
     [],
   );
@@ -61,6 +67,11 @@ export const PointCloudViewer = forwardRef<
     latestViewSpec.current = viewSpec;
     sceneRef.current?.setViewSpec(viewSpec);
   }, [viewSpec]);
+
+  useEffect(() => {
+    latestSelectedPoints.current = selectedPoints;
+    sceneRef.current?.setSelectedPoints(selectedPoints);
+  }, [selectedPoints]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -75,6 +86,7 @@ export const PointCloudViewer = forwardRef<
         pointcloudScene = createPointCloudScene(canvas);
         sceneRef.current = pointcloudScene;
         pointcloudScene.setViewSpec(latestViewSpec.current);
+        pointcloudScene.setSelectedPoints(latestSelectedPoints.current);
         const response = await fetch(pointcloudUrl, {
           credentials: "include",
           signal: controller.signal,

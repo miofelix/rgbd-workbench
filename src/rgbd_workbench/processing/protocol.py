@@ -240,9 +240,8 @@ def decode_pointcloud(payload: bytes | bytearray | memoryview) -> ParsedPointClo
     )
 
 
-def encode_ply(result: Any, manifest: DerivationManifestV1) -> bytes:
-    count = result.point_count
-    header = "\n".join(
+def _ply_header(manifest: DerivationManifestV1) -> bytes:
+    return "\n".join(
         [
             "ply",
             "format binary_little_endian 1.0",
@@ -251,7 +250,7 @@ def encode_ply(result: Any, manifest: DerivationManifestV1) -> bytes:
             f"comment representation {manifest.representation}",
             f"comment scene_hash {manifest.scene_hash}",
             f"comment derivation_key {manifest.derivation_key}",
-            f"element vertex {count}",
+            f"element vertex {manifest.point_count}",
             "property float x",
             "property float y",
             "property float z",
@@ -263,23 +262,39 @@ def encode_ply(result: Any, manifest: DerivationManifestV1) -> bytes:
             "",
         ]
     ).encode("ascii")
-    record_dtype = np.dtype(
-        [
-            ("x", "<f4"),
-            ("y", "<f4"),
-            ("z", "<f4"),
-            ("red", "u1"),
-            ("green", "u1"),
-            ("blue", "u1"),
-            ("source_pixel_index", "<u4"),
-        ],
-        align=False,
-    )
-    records = np.empty(count, dtype=record_dtype)
+
+
+_PLY_RECORD_DTYPE = np.dtype(
+    [
+        ("x", "<f4"),
+        ("y", "<f4"),
+        ("z", "<f4"),
+        ("red", "u1"),
+        ("green", "u1"),
+        ("blue", "u1"),
+        ("source_pixel_index", "<u4"),
+    ],
+    align=False,
+)
+
+
+def validate_ply(payload: bytes, manifest: DerivationManifestV1) -> None:
+    header = _ply_header(manifest)
+    expected_size = len(header) + manifest.point_count * _PLY_RECORD_DTYPE.itemsize
+    if not payload.startswith(header) or len(payload) != expected_size:
+        raise ValueError("PLY payload does not match the derivation manifest")
+
+
+def encode_ply(result: Any, manifest: DerivationManifestV1) -> bytes:
+    count = result.point_count
+    header = _ply_header(manifest)
+    records = np.empty(count, dtype=_PLY_RECORD_DTYPE)
     records["x"], records["y"], records["z"] = result.positions.T
     records["red"], records["green"], records["blue"] = result.colors.T
     records["source_pixel_index"] = result.pixel_index
-    return header + records.tobytes(order="C")
+    payload = header + records.tobytes(order="C")
+    validate_ply(payload, manifest)
+    return payload
 
 
 def derivation_json(manifest: DerivationManifestV1) -> bytes:

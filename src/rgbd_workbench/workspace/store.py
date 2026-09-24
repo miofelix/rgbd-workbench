@@ -17,7 +17,7 @@ from pydantic import ValidationError
 from rgbd_workbench.domain.canonical import canonical_json_bytes
 from rgbd_workbench.domain.contracts import DerivationManifestV1, SceneManifestV1, SourceRef
 from rgbd_workbench.domain.diagnostics import Diagnostic
-from rgbd_workbench.processing.protocol import decode_pointcloud
+from rgbd_workbench.processing.protocol import decode_pointcloud, validate_ply
 from rgbd_workbench.workspace.paths import WorkspacePaths
 
 _SAFE_SCENE_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$")
@@ -26,6 +26,8 @@ _CHUNK_SIZE = 1024 * 1024
 _DERIVATION_FILES = frozenset(
     {"manifest.json", "pointcloud.bin", "pointcloud.ply", "parameters.json"}
 )
+_DERIVATION_INTEGRITY_FILE = ".integrity.json"
+_DERIVATION_CACHE_FILES = _DERIVATION_FILES | {_DERIVATION_INTEGRITY_FILE}
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,6 +279,47 @@ class WorkspaceStore:
             raise SceneSourceError("LINKED_SOURCE_STALE", "linked source identity changed")
         return linked_path.resolve(strict=True)
 
+    def snapshot_scene_source(
+        self,
+        scene_id: str,
+        role: Literal["rgb", "depth"],
+        directory: Path,
+    ) -> Path:
+        """Copy one verified source into an immutable per-request snapshot."""
+        self.paths._assert_inside_root(directory)
+        manifest = self.get_scene(scene_id)
+        source = manifest.rgb if role == "rgb" else manifest.depth
+        source_path = self.resolve_scene_source(scene_id, role)
+        destination = directory / f"{role}-{Path(source.filename).name}"
+        digest = hashlib.sha256()
+        total = 0
+        try:
+            with source_path.open("rb") as input_file, destination.open("xb") as output_file:
+                before = os.fstat(input_file.fileno())
+                while chunk := input_file.read(_CHUNK_SIZE):
+                    digest.update(chunk)
+                    total += len(chunk)
+                    output_file.write(chunk)
+                output_file.flush()
+                os.fsync(output_file.fileno())
+                after = os.fstat(input_file.fileno())
+        except OSError as exc:
+            destination.unlink(missing_ok=True)
+            raise SceneSourceError(
+                "SCENE_SOURCE_STALE", "source snapshot could not be read"
+            ) from exc
+        identity_before = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+        identity_after = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+        if (
+            identity_before != identity_after
+            or total != source.size_bytes
+            or digest.hexdigest() != source.sha256
+        ):
+            destination.unlink(missing_ok=True)
+            raise SceneSourceError("SCENE_SOURCE_STALE", "source changed while being snapshotted")
+        self.resolve_scene_source(scene_id, role)
+        return destination
+
     def derivation_dir(self, scene_id: str, derivation_key: str) -> Path:
         if not _SAFE_SCENE_ID.fullmatch(scene_id):
             raise ValueError("scene id is invalid")
@@ -303,6 +346,8 @@ class WorkspaceStore:
     ) -> None:
         self.initialize()
         self.get_scene(scene_id)
+        self.resolve_scene_source(scene_id, "rgb")
+        self.resolve_scene_source(scene_id, "depth")
         target = self.derivation_dir(scene_id, derivation_key)
         if set(files) != _DERIVATION_FILES:
             raise ValueError("derivation files are incomplete")
@@ -318,6 +363,10 @@ class WorkspaceStore:
             temp_dir.mkdir(parents=True)
             for name, data in files.items():
                 self._atomic_write(temp_dir / name, data)
+            self._atomic_write(
+                temp_dir / _DERIVATION_INTEGRITY_FILE,
+                self._derivation_integrity(files),
+            )
             self._load_cached_derivation(temp_dir, scene_id, derivation_key)
             self._fsync_directory(temp_dir)
             os.replace(temp_dir, target)
@@ -331,9 +380,11 @@ class WorkspaceStore:
     ) -> CachedDerivation:
         if directory.is_symlink() or not directory.is_dir():
             raise ValueError("derivation cache directory is invalid")
-        paths = {name: directory / name for name in _DERIVATION_FILES}
-        if any(path.is_symlink() or not path.is_file() for path in paths.values()):
+        cache_paths = {name: directory / name for name in _DERIVATION_CACHE_FILES}
+        if any(path.is_symlink() or not path.is_file() for path in cache_paths.values()):
             raise ValueError("derivation cache files are incomplete")
+        paths = {name: cache_paths[name] for name in _DERIVATION_FILES}
+        self._validate_derivation_integrity(cache_paths[_DERIVATION_INTEGRITY_FILE], paths)
         manifest = DerivationManifestV1.model_validate_json(paths["manifest.json"].read_bytes())
         if (
             manifest.scene_id != scene_id
@@ -347,9 +398,56 @@ class WorkspaceStore:
         parameters = DerivationManifestV1.model_validate_json(paths["parameters.json"].read_bytes())
         if parameters != manifest:
             raise ValueError("parameter manifest does not match cache manifest")
-        if not paths["pointcloud.ply"].read_bytes().startswith(b"ply\n"):
-            raise ValueError("PLY cache is invalid")
+        validate_ply(paths["pointcloud.ply"].read_bytes(), manifest)
         return CachedDerivation(directory=directory, manifest=manifest)
+
+    @staticmethod
+    def _derivation_integrity(files: Mapping[str, bytes]) -> bytes:
+        return canonical_json_bytes(
+            {
+                "schema_version": 1,
+                "artifacts": {
+                    name: {
+                        "size_bytes": len(files[name]),
+                        "sha256": hashlib.sha256(files[name]).hexdigest(),
+                    }
+                    for name in sorted(_DERIVATION_FILES)
+                },
+            }
+        )
+
+    def _validate_derivation_integrity(
+        self,
+        integrity_path: Path,
+        artifact_paths: Mapping[str, Path],
+    ) -> None:
+        try:
+            payload = json.loads(integrity_path.read_bytes())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("derivation integrity metadata is invalid") from exc
+        if not isinstance(payload, dict) or set(payload) != {"schema_version", "artifacts"}:
+            raise ValueError("derivation integrity metadata is invalid")
+        artifacts = payload.get("artifacts")
+        if payload.get("schema_version") != 1 or not isinstance(artifacts, dict):
+            raise ValueError("derivation integrity metadata is invalid")
+        if set(artifacts) != _DERIVATION_FILES:
+            raise ValueError("derivation integrity metadata is incomplete")
+        for name, path in artifact_paths.items():
+            expected = artifacts.get(name)
+            if not isinstance(expected, dict) or set(expected) != {"size_bytes", "sha256"}:
+                raise ValueError("derivation artifact integrity is invalid")
+            size = expected.get("size_bytes")
+            sha256 = expected.get("sha256")
+            if (
+                not isinstance(size, int)
+                or isinstance(size, bool)
+                or size < 0
+                or not isinstance(sha256, str)
+                or _SAFE_DERIVATION_KEY.fullmatch(sha256) is None
+                or path.stat().st_size != size
+                or self._hash_file(path) != sha256
+            ):
+                raise ValueError("derivation artifact integrity does not match cache")
 
     def _remove_cache_directory(self, directory: Path) -> None:
         if directory.is_symlink():

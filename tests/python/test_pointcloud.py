@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import rgbd_workbench.processing.pointcloud as pointcloud
 from rgbd_workbench.adapters.base import NormalizedDepth
 from rgbd_workbench.domain.contracts import (
     AlignmentSpec,
@@ -12,7 +13,10 @@ from rgbd_workbench.domain.contracts import (
     SceneManifestV1,
     SourceRef,
 )
-from rgbd_workbench.processing.pointcloud import PointCloudProcessingError, build_derivation
+from rgbd_workbench.processing.pointcloud import (
+    PointCloudProcessingError,
+    build_derivation,
+)
 
 
 def scene(*, representation: str = "z_depth", unit: str = "m") -> SceneManifestV1:
@@ -147,6 +151,21 @@ def test_knn_filter_and_smooth_handle_small_point_sets():
 
     assert result.point_count == 4
     assert np.isfinite(result.positions).all()
+
+
+def test_knn_work_budget_rejects_unbounded_neighbor_allocation():
+    processing = ProcessingSpecV1(
+        knn_filter={"k": 64, "std_ratio": 2.0},
+        knn_smooth={"k": 64},
+    )
+
+    validate_budget = getattr(pointcloud, "validate_neighbor_work_budget", None)
+    assert callable(validate_budget)
+    with pytest.raises(PointCloudProcessingError) as error:
+        validate_budget(2_000_000, processing)
+
+    assert error.value.diagnostics[0].code == "DERIVATION_RESOURCE_LIMIT"
+    assert error.value.diagnostics[0].field == "processing.knn"
 
 
 def test_empty_result_raises_structured_diagnostic():

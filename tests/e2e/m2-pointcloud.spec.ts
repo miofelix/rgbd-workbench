@@ -48,6 +48,7 @@ async function importScene(
   representation: "z_depth" | "relative_z",
 ): Promise<void> {
   await page.goto("/?token=e2e-token");
+  await page.waitForLoadState("networkidle");
   await page.setInputFiles('input[aria-label="可选 manifest 文件"]', {
     name: "scene.json",
     mimeType: "application/json",

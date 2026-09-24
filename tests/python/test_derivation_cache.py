@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import struct
 from io import BytesIO
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from rgbd_workbench.domain.contracts import (
 )
 from rgbd_workbench.processing.pointcloud import PointCloudResult
 from rgbd_workbench.processing.protocol import (
+    decode_pointcloud,
     derivation_json,
     encode_ply,
     encode_pointcloud,
@@ -138,6 +140,31 @@ def test_corrupt_binary_cache_is_removed_instead_of_reused(tmp_path: Path):
     store.publish_derivation("scene-1", key, cache_files("scene-1", key))
     binary = store.derivation_dir("scene-1", key) / "pointcloud.bin"
     binary.write_bytes(binary.read_bytes()[:-1])
+
+    assert store.read_cached_derivation("scene-1", key) is None
+    assert not store.derivation_dir("scene-1", key).exists()
+
+
+def test_same_length_binary_corruption_invalidates_cache(tmp_path: Path):
+    store, _ = committed_store(tmp_path)
+    key = "a" * 64
+    store.publish_derivation("scene-1", key, cache_files("scene-1", key))
+    binary = store.derivation_dir("scene-1", key) / "pointcloud.bin"
+    payload = bytearray(binary.read_bytes())
+    position_offset = decode_pointcloud(payload).manifest.arrays["positions"].offset
+    struct.pack_into("<f", payload, position_offset, 123.0)
+    binary.write_bytes(payload)
+
+    assert store.read_cached_derivation("scene-1", key) is None
+    assert not store.derivation_dir("scene-1", key).exists()
+
+
+def test_truncated_ply_invalidates_cache(tmp_path: Path):
+    store, _ = committed_store(tmp_path)
+    key = "a" * 64
+    store.publish_derivation("scene-1", key, cache_files("scene-1", key))
+    ply = store.derivation_dir("scene-1", key) / "pointcloud.ply"
+    ply.write_bytes(b"ply\n")
 
     assert store.read_cached_derivation("scene-1", key) is None
     assert not store.derivation_dir("scene-1", key).exists()

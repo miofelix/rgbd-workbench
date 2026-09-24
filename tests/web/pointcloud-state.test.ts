@@ -120,4 +120,27 @@ describe("point-cloud workbench state", () => {
     expect(useWorkbenchStore.getState().appliedDerivation).toBeNull();
     expect(useWorkbenchStore.getState().selectedPoints).toEqual([]);
   });
+
+  it("clears selections when Apply replaces the derivation", async () => {
+    useWorkbenchStore.getState().selectScene(scene("scene-1"));
+    await useWorkbenchStore
+      .getState()
+      .applyProcessing(async () => derivationResponse("scene-1"));
+    useWorkbenchStore
+      .getState()
+      .selectPoint({ pixelIndex: 0, position: [0, 0, 1], unit: "m" });
+    const replacement = derivationResponse("scene-1");
+    replacement.derivation = {
+      ...replacement.derivation,
+      derivation_id: `derivation-${"c".repeat(64)}`,
+      derivation_key: "c".repeat(64),
+    };
+
+    await useWorkbenchStore.getState().applyProcessing(async () => replacement);
+
+    expect(useWorkbenchStore.getState().appliedDerivation?.derivation_id).toBe(
+      replacement.derivation.derivation_id,
+    );
+    expect(useWorkbenchStore.getState().selectedPoints).toEqual([]);
+  });
 });

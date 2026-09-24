@@ -9,6 +9,7 @@ from pydantic import (
     FiniteFloat,
     StrictInt,
     StringConstraints,
+    field_validator,
     model_validator,
 )
 
@@ -180,6 +181,17 @@ class ProcessingSpecV1(StrictModel):
     knn_filter: KNNFilterSpec | None = None
     knn_smooth: KNNSmoothSpec | None = None
 
+    @field_validator("roi")
+    @classmethod
+    def roi_is_non_empty(
+        cls, value: tuple[int, int, int, int] | None
+    ) -> tuple[int, int, int, int] | None:
+        if value is not None:
+            x_min, y_min, x_max, y_max = value
+            if x_min >= x_max or y_min >= y_max:
+                raise ValueError("roi must be a non-empty x/y rectangle")
+        return value
+
     @model_validator(mode="after")
     def ranges_are_ordered(self) -> ProcessingSpecV1:
         if self.depth_min is not None and self.depth_max is not None:
@@ -188,10 +200,6 @@ class ProcessingSpecV1(StrictModel):
         if self.xyz_min is not None and self.xyz_max is not None:
             if any(low > high for low, high in zip(self.xyz_min, self.xyz_max, strict=True)):
                 raise ValueError("xyz_min must not exceed xyz_max")
-        if self.roi is not None:
-            x_min, y_min, x_max, y_max = self.roi
-            if x_min >= x_max or y_min >= y_max:
-                raise ValueError("roi must be a non-empty x/y rectangle")
         return self
 
 

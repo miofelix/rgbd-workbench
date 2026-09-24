@@ -5,9 +5,11 @@ import { pointcloudPayload } from "./pointcloud-fixtures";
 
 const sceneMocks = vi.hoisted(() => ({
   setPoints: vi.fn(),
+  setSelectedPoints: vi.fn(),
   resetView: vi.fn(),
   setViewSpec: vi.fn(),
   pick: vi.fn(),
+  selectPixel: vi.fn(),
   capturePng: vi.fn(() => "data:image/png;base64,fixture"),
   dispose: vi.fn(),
 }));
