@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal
+import math
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -113,6 +114,171 @@ class CapabilityReport(StrictModel):
     relative_pointcloud: bool
     metric_pointcloud: bool
     video_export: bool
+
+
+TrajectoryType = Literal[
+    "orbit",
+    "elliptical_orbit",
+    "dolly",
+    "pan",
+    "lift",
+    "orbit_tilt",
+    "spiral",
+    "flyover",
+    "dolly_zoom",
+    "custom",
+]
+TrajectoryTargetSource = Literal["robust_center", "roi_center", "selected_point", "manual"]
+TrajectoryEasing = Literal["linear", "smoothstep", "ease_in_out_cubic"]
+TrajectoryLoopMode = Literal["once", "loop"]
+ProjectionMode = Literal["perspective", "orthographic"]
+RenderLayout = Literal["pointcloud", "rgb_depth_pointcloud"]
+RenderCodec = Literal["h264", "vp9", "png_sequence"]
+
+Vec3 = tuple[FiniteFloat, FiniteFloat, FiniteFloat]
+
+
+def _vector_length(vector: tuple[float, float, float]) -> float:
+    return math.sqrt(float(vector[0]) ** 2 + float(vector[1]) ** 2 + float(vector[2]) ** 2)
+
+
+def _view_is_valid(position: Vec3, target: Vec3, up: Vec3) -> bool:
+    direction = (
+        float(target[0] - position[0]),
+        float(target[1] - position[1]),
+        float(target[2] - position[2]),
+    )
+    up_vector = (float(up[0]), float(up[1]), float(up[2]))
+    direction_length = _vector_length(direction)
+    up_length = _vector_length(up_vector)
+    if direction_length <= 1e-9 or up_length <= 1e-9:
+        return False
+    cross = (
+        direction[1] * up_vector[2] - direction[2] * up_vector[1],
+        direction[2] * up_vector[0] - direction[0] * up_vector[2],
+        direction[0] * up_vector[1] - direction[1] * up_vector[0],
+    )
+    return _vector_length(cross) > direction_length * up_length * 1e-6
+
+
+class CameraKeyframeV1(StrictModel):
+    time: FiniteFloat = Field(ge=0)
+    position: Vec3
+    target: Vec3
+    up: Vec3 = (0.0, -1.0, 0.0)
+    projection: ProjectionMode = "perspective"
+    fov: FiniteFloat = Field(default=45.0, gt=0, lt=180)
+    ortho_scale: FiniteFloat = Field(default=1.0, gt=0)
+    easing: TrajectoryEasing = "smoothstep"
+
+    @model_validator(mode="after")
+    def view_is_non_degenerate(self) -> CameraKeyframeV1:
+        if not _view_is_valid(self.position, self.target, self.up):
+            raise ValueError("camera keyframe position, target, and up are degenerate")
+        return self
+
+
+class CameraPathV1(StrictModel):
+    schema_version: Literal[1] = 1
+    frame: Annotated[str, StringConstraints(min_length=1, max_length=128, strict=True)] = "camera"
+    unit: Literal["m", "unitless"]
+    trajectory_type: TrajectoryType
+    target_source: TrajectoryTargetSource = "manual"
+    target: Vec3
+    duration: FiniteFloat = Field(gt=0, le=3600)
+    fps: StrictInt = Field(default=30, ge=1, le=240)
+    easing: TrajectoryEasing = "smoothstep"
+    loop_mode: TrajectoryLoopMode = "once"
+    projection: ProjectionMode = "perspective"
+    fov: FiniteFloat = Field(default=45.0, gt=0, lt=180)
+    ortho_scale: FiniteFloat = Field(default=1.0, gt=0)
+    parameters: dict[
+        Annotated[str, StringConstraints(min_length=1, max_length=64, strict=True)], FiniteFloat
+    ] = Field(default_factory=dict)
+    keyframes: list[CameraKeyframeV1] = Field(default_factory=list, max_length=1024)
+    sampler_version: VersionString = "1"
+
+    @model_validator(mode="after")
+    def validate_timeline(self) -> CameraPathV1:
+        if self.trajectory_type == "custom" and len(self.keyframes) < 2:
+            raise ValueError("custom camera paths require at least two keyframes")
+        if self.trajectory_type != "custom" and self.keyframes:
+            raise ValueError("preset camera paths cannot contain custom keyframes")
+        if self.keyframes:
+            times = [float(keyframe.time) for keyframe in self.keyframes]
+            if times[0] != 0.0 or times[-1] != float(self.duration):
+                raise ValueError("keyframe times must start at zero and end at duration")
+            if any(left >= right for left, right in zip(times, times[1:])):
+                raise ValueError("keyframe times must be strictly increasing")
+            if any(
+                keyframe.projection != self.keyframes[0].projection for keyframe in self.keyframes
+            ):
+                raise ValueError("custom keyframes must use one projection mode")
+            if self.loop_mode == "loop":
+                first, last = self.keyframes[0], self.keyframes[-1]
+                tolerance = 1e-6
+                for left, right in (
+                    (first.position, last.position),
+                    (first.target, last.target),
+                    (first.up, last.up),
+                ):
+                    if any(abs(a - b) > tolerance for a, b in zip(left, right, strict=True)):
+                        raise ValueError("loop keyframes must have matching endpoints")
+                if first.fov != last.fov or first.ortho_scale != last.ortho_scale:
+                    raise ValueError("loop keyframes must have matching projection parameters")
+        if self.target_source == "manual" and self.target is None:
+            raise ValueError("manual camera paths require a resolved target")
+        return self
+
+
+class RenderSpecV1(StrictModel):
+    schema_version: Literal[1] = 1
+    layout: RenderLayout = "pointcloud"
+    width: StrictInt = Field(default=1280, gt=0, le=3840)
+    height: StrictInt = Field(default=720, gt=0, le=2160)
+    fps: StrictInt = Field(default=30, ge=1, le=240)
+    duration: FiniteFloat = Field(default=5.0, gt=0, le=3600)
+    codec: RenderCodec = "h264"
+    quality: StrictInt = Field(default=80, ge=0, le=100)
+    point_budget: StrictInt = Field(default=150_000, ge=100, le=2_000_000)
+    point_size: FiniteFloat = Field(default=2.0, gt=0, le=64)
+    antialias: Literal[1, 2] = 1
+    background: tuple[StrictInt, StrictInt, StrictInt] = (18, 37, 50)
+    depth_colormap: Annotated[str, StringConstraints(min_length=1, max_length=32, strict=True)] = (
+        "viridis"
+    )
+    depth_range: tuple[FiniteFloat, FiniteFloat] | None = None
+    show_axes: bool = False
+    show_grid: bool = False
+    show_title: bool = False
+    show_time: bool = False
+    show_provenance: bool = False
+    scene_revision: (
+        Annotated[str, StringConstraints(min_length=1, max_length=128, strict=True)] | None
+    ) = None
+    derivation_id: DerivationId | None = None
+    view_spec: dict[str, Any] = Field(default_factory=dict)
+    camera_path: CameraPathV1 | None = None
+
+    @field_validator("background")
+    @classmethod
+    def background_is_rgb(cls, value: tuple[int, int, int]) -> tuple[int, int, int]:
+        if any(channel < 0 or channel > 255 for channel in value):
+            raise ValueError("background channels must be in the range 0..255")
+        return value
+
+    @model_validator(mode="after")
+    def validate_render_ranges(self) -> RenderSpecV1:
+        if self.depth_range is not None and self.depth_range[0] > self.depth_range[1]:
+            raise ValueError("depth_range minimum must not exceed maximum")
+        if self.codec == "h264" and (self.width % 2 or self.height % 2):
+            raise ValueError("h264 render dimensions must be even")
+        if self.camera_path is not None:
+            if self.camera_path.fps != self.fps:
+                raise ValueError("camera path and render fps must match")
+            if self.camera_path.duration != self.duration:
+                raise ValueError("camera path and render duration must match")
+        return self
 
 
 class KNNFilterSpec(StrictModel):

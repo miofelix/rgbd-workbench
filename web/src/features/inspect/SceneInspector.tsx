@@ -14,6 +14,7 @@ import { ProcessingPanel } from "../pointcloud/ProcessingPanel";
 import { DepthPreview } from "./DepthPreview";
 import { LinkedImagePreview } from "./LinkedImagePreview";
 import { StatisticsPanel } from "./StatisticsPanel";
+import { TrajectoryPanel } from "../trajectory/TrajectoryPanel";
 
 interface SceneInspectorProps {
   scene: SceneSummary | null;
@@ -254,14 +255,35 @@ export function SceneInspector({
         </>
       )}
 
-      {mode === "trajectory" && (
-        <section className="mode-placeholder panel">
-          <span className="eyebrow">M3 CAPABILITY GATE</span>
-          <h3>轨迹与视频导出</h3>
-          <p>轨迹编辑与视频导出属于 M3，将复用当前 applied derivation。</p>
-          <span className="coming-pill">即将解锁</span>
-        </section>
-      )}
+      {mode === "trajectory" &&
+        (currentDerivation && currentUrls ? (
+          <div className="trajectory-workspace">
+            <section className="panel viewer-panel">
+              <div className="panel-heading">
+                <div>
+                  <span className="eyebrow">APPLIED DERIVATION</span>
+                  <h3>轨迹点云</h3>
+                </div>
+                <span className="viewer-meta">
+                  {currentDerivation.point_count.toLocaleString()} 点 ·{" "}
+                  {currentDerivation.unit}
+                </span>
+              </div>
+              {viewer}
+            </section>
+            <TrajectoryPanel
+              derivation={currentDerivation}
+              viewerRef={viewerRef}
+            />
+          </div>
+        ) : (
+          <section className="mode-placeholder panel">
+            <span className="eyebrow">DERIVATION REQUIRED</span>
+            <h3>轨迹与视频导出</h3>
+            <p>先应用点云处理，再使用当前 applied derivation 预览相机轨迹。</p>
+            <span className="coming-pill">视频编码尚未启用</span>
+          </section>
+        ))}
     </div>
   );
 }

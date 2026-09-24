@@ -148,3 +148,21 @@ test("keeps relative geometry unitless and responsive", async ({ page }) => {
   );
   expect(overflow).toBe(false);
 });
+
+test("previews a camera trajectory from the applied derivation", async ({
+  page,
+}) => {
+  await importScene(page, "z_depth");
+  await page.getByRole("button", { name: "应用处理" }).click();
+  await expect(page.getByText("点云视图", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: /轨迹与导出/ }).click();
+  await expect(page.getByRole("heading", { name: "轨迹预览" })).toBeVisible();
+  await expect(page.getByLabel("轨迹预设")).toHaveValue("orbit");
+  await page.getByLabel("轨迹预设").selectOption("spiral");
+  await expect(page.getByText("150 帧", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "播放轨迹" }).click();
+  await expect(page.getByRole("button", { name: "暂停轨迹" })).toBeVisible();
+  await page.getByRole("button", { name: "重置轨迹" }).click();
+  await expect(page.getByRole("button", { name: "播放轨迹" })).toBeVisible();
+});

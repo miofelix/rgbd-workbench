@@ -39,6 +39,7 @@ vi.mock("../../web/src/features/pointcloud/PointCloudViewer", () => ({
     useImperativeHandle(ref, () => ({
       capturePng: () => "data:image/png;base64,fixture",
       resetView: vi.fn(),
+      setCameraPose: vi.fn(),
       selectPixel: (pixelIndex: number) => ({
         pixelIndex: pixelIndex === 3 ? 1 : pixelIndex,
         position: pixelIndex === 3 ? [0, 0.3, 1.4] : [0, 0, 1],
@@ -257,6 +258,34 @@ describe("point-cloud analysis workflow", () => {
     await user.click(screen.getByRole("button", { name: "下载 PNG" }));
     expect(clickSpy).toHaveBeenCalled();
     clickSpy.mockRestore();
+  });
+
+  it("previews an applied derivation with a deterministic trajectory", async () => {
+    const user = userEvent.setup();
+    await useWorkbenchStore
+      .getState()
+      .applyProcessing(async () => unitlessResponse());
+    render(<SceneInspector scene={unitlessScene()} mode="trajectory" />);
+
+    expect(
+      screen.getByRole("heading", { name: "轨迹点云" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "轨迹预览" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("轨迹预设")).toHaveValue("orbit");
+    expect(screen.getByText("150 帧")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("轨迹预设"), "spiral");
+    expect(screen.getByText("150 帧")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "播放轨迹" }));
+    expect(
+      screen.getByRole("button", { name: "暂停轨迹" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "重置轨迹" }));
+    expect(
+      screen.getByRole("button", { name: "播放轨迹" }),
+    ).toBeInTheDocument();
   });
 
   it("links image pixels and point-cloud selections in both directions", async () => {

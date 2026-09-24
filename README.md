@@ -23,8 +23,13 @@ repository.
 - Atomic derivation caching keyed by Scene hash, processing parameters and processor version.
 - Binary point-cloud protocol downloads plus binary little-endian PLY and parameter JSON exports. Unitless
   derivations remain explicitly `unitless` in measurements and exports; they are never relabeled as meters.
+- Versioned `CameraPathV1` and `RenderSpecV1` contracts with deterministic Python sampling for the M3
+  trajectory/rendering foundation. Video jobs and encoders are still gated until the renderer is complete.
+- A deterministic CPU point-cloud frame renderer with perspective/orthographic projection, stable z-buffer
+  tie-breaking, point budgets and PNG encoding for the future render job boundary.
 
-Trajectory editing, camera paths, video rendering, SSE jobs and workspace packaging remain M3 capabilities.
+Full trajectory editing, camera-path persistence, video rendering, SSE jobs and workspace packaging remain
+later M3 capabilities; the current preview is intentionally local to the applied derivation.
 
 ## Install
 

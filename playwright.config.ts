@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  // E2E cases share the local service token and workspace; parallel workers race on imports.
+  workers: 1,
   use: {
     baseURL: "http://127.0.0.1:8765",
     trace: "retain-on-failure",

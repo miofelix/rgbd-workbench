@@ -8,12 +8,14 @@ import {
 } from "react";
 
 import type { SelectedPoint, ViewSpec } from "../../api/types";
+import type { CameraPose } from "../../trajectory/sampler";
 import type { PointCloudSceneHandle } from "../../viewer/pointcloud-scene";
 import { parsePointCloudPayload } from "./pointcloud-protocol";
 
 export interface PointCloudViewerHandle {
   capturePng: () => string | null;
   resetView: () => void;
+  setCameraPose: (pose: CameraPose) => void;
   selectPixel: (pixelIndex: number) => SelectedPoint | null;
 }
 
@@ -57,6 +59,7 @@ export const PointCloudViewer = forwardRef<
     () => ({
       capturePng: () => sceneRef.current?.capturePng() ?? null,
       resetView: () => sceneRef.current?.resetView(),
+      setCameraPose: (pose) => sceneRef.current?.setCameraPose(pose),
       selectPixel: (pixelIndex) =>
         sceneRef.current?.selectPixel(pixelIndex) ?? null,
     }),

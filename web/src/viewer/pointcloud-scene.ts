@@ -4,6 +4,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { SelectedPoint, ViewSpec } from "../api/types";
 import type { ParsedPointCloud } from "../features/pointcloud/pointcloud-protocol";
 import { stableLod } from "../features/pointcloud/pointcloud-protocol";
+import type { CameraPose } from "../trajectory/sampler";
 
 export interface PointCloudSceneOptions {
   background?: "dark" | "light";
@@ -15,6 +16,7 @@ export interface PointCloudSceneHandle {
   setPoints: (data: ParsedPointCloud) => void;
   setSelectedPoints: (points: readonly SelectedPoint[]) => void;
   setViewSpec: (view: ViewSpec) => void;
+  setCameraPose: (pose: CameraPose) => void;
   resetView: () => void;
   pick: (clientX: number, clientY: number) => SelectedPoint | null;
   selectPixel: (pixelIndex: number) => SelectedPoint | null;
@@ -279,6 +281,37 @@ export function createPointCloudScene(
     if (projectionChanged && points !== null) resetView();
   };
 
+  const setCameraPose = (pose: CameraPose): void => {
+    const displayPosition = new THREE.Vector3(
+      pose.position[0],
+      -pose.position[1],
+      -pose.position[2],
+    );
+    const displayTarget = new THREE.Vector3(
+      pose.target[0],
+      -pose.target[1],
+      -pose.target[2],
+    );
+    const displayUp = new THREE.Vector3(pose.up[0], -pose.up[1], -pose.up[2]);
+    camera =
+      pose.projection === "orthographic"
+        ? orthographicCamera
+        : perspectiveCamera;
+    controls.object = camera;
+    camera.position.copy(displayPosition);
+    camera.up.copy(displayUp.normalize());
+    controls.target.copy(displayTarget);
+    if (camera instanceof THREE.PerspectiveCamera) {
+      camera.fov = pose.fov;
+      camera.updateProjectionMatrix();
+    } else {
+      orthographicExtent = Math.max(pose.ortho_scale / 2, 0.001);
+      resize();
+    }
+    camera.lookAt(displayTarget);
+    controls.update();
+  };
+
   const setPoints = (data: ParsedPointCloud): void => {
     disposePoints();
     parsed = data;
@@ -357,6 +390,7 @@ export function createPointCloudScene(
     setPoints,
     setSelectedPoints,
     setViewSpec,
+    setCameraPose,
     resetView,
     pick,
     selectPixel: (pixelIndex) =>

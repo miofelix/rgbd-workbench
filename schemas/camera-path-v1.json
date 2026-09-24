@@ -1,0 +1,265 @@
+{
+  "$defs": {
+    "CameraKeyframeV1": {
+      "additionalProperties": false,
+      "properties": {
+        "easing": {
+          "default": "smoothstep",
+          "enum": [
+            "linear",
+            "smoothstep",
+            "ease_in_out_cubic"
+          ],
+          "title": "Easing",
+          "type": "string"
+        },
+        "fov": {
+          "default": 45.0,
+          "exclusiveMaximum": 180,
+          "exclusiveMinimum": 0,
+          "title": "Fov",
+          "type": "number"
+        },
+        "ortho_scale": {
+          "default": 1.0,
+          "exclusiveMinimum": 0,
+          "title": "Ortho Scale",
+          "type": "number"
+        },
+        "position": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Position",
+          "type": "array"
+        },
+        "projection": {
+          "default": "perspective",
+          "enum": [
+            "perspective",
+            "orthographic"
+          ],
+          "title": "Projection",
+          "type": "string"
+        },
+        "target": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Target",
+          "type": "array"
+        },
+        "time": {
+          "minimum": 0,
+          "title": "Time",
+          "type": "number"
+        },
+        "up": {
+          "default": [
+            0.0,
+            -1.0,
+            0.0
+          ],
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Up",
+          "type": "array"
+        }
+      },
+      "required": [
+        "time",
+        "position",
+        "target"
+      ],
+      "title": "CameraKeyframeV1",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "duration": {
+      "exclusiveMinimum": 0,
+      "maximum": 3600,
+      "title": "Duration",
+      "type": "number"
+    },
+    "easing": {
+      "default": "smoothstep",
+      "enum": [
+        "linear",
+        "smoothstep",
+        "ease_in_out_cubic"
+      ],
+      "title": "Easing",
+      "type": "string"
+    },
+    "fov": {
+      "default": 45.0,
+      "exclusiveMaximum": 180,
+      "exclusiveMinimum": 0,
+      "title": "Fov",
+      "type": "number"
+    },
+    "fps": {
+      "default": 30,
+      "maximum": 240,
+      "minimum": 1,
+      "title": "Fps",
+      "type": "integer"
+    },
+    "frame": {
+      "default": "camera",
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Frame",
+      "type": "string"
+    },
+    "keyframes": {
+      "items": {
+        "$ref": "#/$defs/CameraKeyframeV1"
+      },
+      "maxItems": 1024,
+      "title": "Keyframes",
+      "type": "array"
+    },
+    "loop_mode": {
+      "default": "once",
+      "enum": [
+        "once",
+        "loop"
+      ],
+      "title": "Loop Mode",
+      "type": "string"
+    },
+    "ortho_scale": {
+      "default": 1.0,
+      "exclusiveMinimum": 0,
+      "title": "Ortho Scale",
+      "type": "number"
+    },
+    "parameters": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "propertyNames": {
+        "maxLength": 64,
+        "minLength": 1
+      },
+      "title": "Parameters",
+      "type": "object"
+    },
+    "projection": {
+      "default": "perspective",
+      "enum": [
+        "perspective",
+        "orthographic"
+      ],
+      "title": "Projection",
+      "type": "string"
+    },
+    "sampler_version": {
+      "default": "1",
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Sampler Version",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "target": {
+      "maxItems": 3,
+      "minItems": 3,
+      "prefixItems": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        }
+      ],
+      "title": "Target",
+      "type": "array"
+    },
+    "target_source": {
+      "default": "manual",
+      "enum": [
+        "robust_center",
+        "roi_center",
+        "selected_point",
+        "manual"
+      ],
+      "title": "Target Source",
+      "type": "string"
+    },
+    "trajectory_type": {
+      "enum": [
+        "orbit",
+        "elliptical_orbit",
+        "dolly",
+        "pan",
+        "lift",
+        "orbit_tilt",
+        "spiral",
+        "flyover",
+        "dolly_zoom",
+        "custom"
+      ],
+      "title": "Trajectory Type",
+      "type": "string"
+    },
+    "unit": {
+      "enum": [
+        "m",
+        "unitless"
+      ],
+      "title": "Unit",
+      "type": "string"
+    }
+  },
+  "required": [
+    "unit",
+    "trajectory_type",
+    "target",
+    "duration"
+  ],
+  "title": "CameraPathV1",
+  "type": "object"
+}

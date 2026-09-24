@@ -51,3 +51,18 @@ meaning. `POST /api/v1/scenes/{scene_id}/derivations` is synchronous and cache-b
 only source for the browser viewer, measurements, PLY and JSON exports. M3 should consume an applied
 derivation and introduce the versioned CameraPath/RenderSpec contracts, CPU renderer, jobs/SSE and video
 encoders. Do not add trajectory or video behavior to the M1 import endpoint as an implicit side effect.
+
+The first M3 foundation is available as a pure Python boundary in `rgbd_workbench.trajectories`: strict
+`CameraPathV1`/`CameraKeyframeV1` and `RenderSpecV1` contracts are generated into
+`schemas/camera-path-v1.json` and `schemas/render-spec-v1.json`, while `sample_camera_path()` applies the
+same deterministic frame-count rules that a future browser preview and render job must use. A two-keyframe
+custom path is linear; longer paths use centripetal Catmull-Rom interpolation, and loop paths never repeat
+their endpoint. The Python and TypeScript implementations are checked against the shared
+`fixtures/m3/camera-path-vectors.json` vectors; the browser sampler lives in
+`web/src/trajectory/sampler.ts`. Neither module reads mutable UI state or publishes files.
+
+`rgbd_workbench.rendering.render_pointcloud_frame()` is the next M3 boundary. It consumes an applied
+point-cloud array, a sampled `CameraPose` and `RenderSpecV1`, then returns an RGB `uint8` frame using
+source-frame camera math, deterministic point-budget sampling and source-pixel z-buffer tie-breaking.
+`encode_png()` is intentionally a pure in-memory encoder; video jobs, frame publication and SSE remain
+out of scope until the renderer is integrated with the job lifecycle.

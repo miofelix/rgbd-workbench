@@ -8,13 +8,20 @@ import json
 from pathlib import Path
 from typing import Any
 
-from rgbd_workbench.domain.contracts import DerivationManifestV1, SceneManifestV1
+from rgbd_workbench.domain.contracts import (
+    CameraPathV1,
+    DerivationManifestV1,
+    RenderSpecV1,
+    SceneManifestV1,
+)
 from rgbd_workbench.domain.diagnostics import Diagnostic
 
 SCHEMAS: dict[str, Any] = {
     "scene-manifest-v1.json": SceneManifestV1.model_json_schema(),
     "diagnostic-v1.json": Diagnostic.model_json_schema(),
     "derivation-manifest-v1.json": DerivationManifestV1.model_json_schema(),
+    "camera-path-v1.json": CameraPathV1.model_json_schema(),
+    "render-spec-v1.json": RenderSpecV1.model_json_schema(),
 }
 
 
