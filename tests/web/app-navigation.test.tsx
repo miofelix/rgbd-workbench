@@ -11,9 +11,10 @@ vi.mock("../../web/src/api/client", () => ({
   createDerivation: vi.fn(),
 }));
 vi.mock("../../web/src/features/import/ImportWizard", () => ({
-  ImportWizard: () => (
+  ImportWizard: ({ onCancel }: { onCancel?: () => void }) => (
     <section aria-label="导入向导">
       <input aria-label="测试文件" />
+      {onCancel && <button onClick={onCancel}>取消</button>}
     </section>
   ),
 }));
@@ -64,7 +65,7 @@ it("opens import from the add action, returns to analysis, and switches saved sc
   await user.click(screen.getByRole("button", { name: "添加 Scene" }));
   expect(screen.getByLabelText("导入向导")).toBeInTheDocument();
   expect(screen.getByLabelText("测试文件")).toHaveFocus();
-  await user.click(screen.getByRole("button", { name: "返回当前场景" }));
+  await user.click(screen.getByRole("button", { name: "取消" }));
   expect(screen.queryByLabelText("导入向导")).not.toBeInTheDocument();
   await user.selectOptions(screen.getByLabelText("当前场景"), "second");
   expect(screen.getByRole("heading", { name: "second" })).toBeInTheDocument();

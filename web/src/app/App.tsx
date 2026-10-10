@@ -248,19 +248,11 @@ export function App(): React.JSX.Element {
           )}
           {showImport ? (
             <div className="import-workspace" ref={importContainer}>
-              {appliedScene && (
-                <button
-                  type="button"
-                  className="secondary cancel-import"
-                  onClick={closeImport}
-                >
-                  返回当前场景
-                </button>
-              )}
               <ImportWizard
                 key={importRevision}
                 initialImportId={initialImportId}
-                activeSceneId={activeSceneId}
+                activeSceneId={initialImportId ? undefined : activeSceneId}
+                onCancel={appliedScene ? closeImport : undefined}
                 onProbed={setImportSession}
                 onCommitted={(scene) => {
                   selectScene(scene);

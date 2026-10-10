@@ -1503,3 +1503,22 @@ summary > span {
     animation-duration: 0.01ms !important;
   }
 }
+
+.import-fields {
+  min-width: 0;
+  margin-left: 0;
+  margin-right: 0;
+  padding-left: 0;
+  padding-right: 0;
+  padding-bottom: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+.alignment-field {
+  display: grid;
+  gap: 7px;
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: 12px;
+  max-width: 260px;
+}

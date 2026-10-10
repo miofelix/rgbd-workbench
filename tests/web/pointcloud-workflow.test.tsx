@@ -193,10 +193,11 @@ describe("point-cloud analysis workflow", () => {
     fireEvent.change(screen.getByLabelText("像素步长"), {
       target: { value: "2" },
     });
+    await user.click(screen.getByText("高级处理"));
     await user.click(screen.getByLabelText("离群过滤"));
     expect(screen.getByLabelText("离群 K")).toBeInTheDocument();
     expect(screen.getByLabelText("离群标准差比例")).toBeInTheDocument();
-    expect(screen.getByText("有未应用更改")).toBeInTheDocument();
+    expect(screen.getByText("待生成点云")).toBeInTheDocument();
     expect(useWorkbenchStore.getState().appliedProcessing).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /应用处理/ }));

@@ -72,6 +72,7 @@ export function SceneInspector({
       enabled={geometryReady}
       sourceWidth={sourceWidth}
       sourceHeight={sourceHeight}
+      unit={metric ? "m" : "unitless"}
     />
   );
   const exports = currentUrls ? (
