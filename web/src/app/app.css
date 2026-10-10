@@ -1476,17 +1476,12 @@ summary > span {
   .pointcloud-toolbar {
     gap: 8px;
   }
-  .pointcloud-toolbar > span {
-    display: none;
-  }
+
   .viewer-controls {
     gap: 6px;
   }
-  .viewer-range {
-    width: 100%;
-  }
   .viewer-range input {
-    width: 100px;
+    width: 65px;
   }
   .preview-frame {
     height: 190px;
@@ -1521,4 +1516,30 @@ summary > span {
   color: var(--muted);
   font-size: 12px;
   max-width: 260px;
+}
+
+.scene-toolbar-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.viewer-hint {
+  padding: 10px 12px;
+  color: #b6cec5;
+  font-size: 12px;
+}
+.viewer-error {
+  margin: 10px;
+}
+
+.processing-section {
+  padding: 14px 18px;
+}
+.processing-section > .processing-panel {
+  padding: 18px 0 0;
+  margin-top: 14px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
 }

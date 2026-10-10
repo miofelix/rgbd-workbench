@@ -38,3 +38,11 @@ Future video jobs and custom keyframe editing are not advertised as current acti
 Use the existing Python, TypeScript and browser acceptance suites plus focused interaction tests for new
 state transitions. Inspect desktop and mobile screenshots in addition to overflow checks. Each stage is
 committed separately using English Conventional Commit messages.
+
+## Completed acceptance — 2026-10-10
+
+All three stages are implemented. The complete local check passed with 144 Python tests and 98
+frontend tests, Ruff checks/formatting, Mypy, generated schema verification, TypeScript and production
+build. All nine Chromium acceptance cases passed, including real PLY/JSON/PNG downloads, saved-scene
+geometry completion, point-cloud failure/retry and 320–1440px layout checks. Desktop and phone
+screenshots of inspection, comparison and trajectory modes were visually reviewed with Chinese fonts.

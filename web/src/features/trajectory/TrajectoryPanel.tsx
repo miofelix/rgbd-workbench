@@ -1,10 +1,19 @@
 import { Pause, Play, RotateCcw, Route } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 
 import type { DerivationManifest } from "../../api/types";
 import type { PointCloudViewerHandle } from "../pointcloud/PointCloudViewer";
 import {
   sampleCameraPath,
+  frameCount,
   type CameraPathV1,
   type TrajectoryType,
 } from "../../trajectory/sampler";
@@ -12,7 +21,10 @@ import {
 interface TrajectoryPanelProps {
   derivation: DerivationManifest;
   viewerRef: RefObject<PointCloudViewerHandle | null>;
+  viewerReady?: boolean;
 }
+
+const PREVIEW_FRAME_BUDGET = 6_000;
 
 const PRESETS: Array<{
   value: Exclude<TrajectoryType, "custom">;
@@ -46,37 +58,57 @@ function sceneRadius(derivation: DerivationManifest): number {
 export function TrajectoryPanel({
   derivation,
   viewerRef,
+  viewerReady = true,
 }: TrajectoryPanelProps): React.JSX.Element {
   const target = useMemo(() => targetCenter(derivation), [derivation]);
   const radius = useMemo(() => sceneRadius(derivation), [derivation]);
   const [trajectoryType, setTrajectoryType] =
     useState<Exclude<TrajectoryType, "custom">>("orbit");
-  const [duration, setDuration] = useState(5);
-  const [fps, setFps] = useState(30);
+  const [durationInput, setDurationInput] = useState("5");
+  const [fpsInput, setFpsInput] = useState("30");
   const [loopMode, setLoopMode] = useState<"once" | "loop">("loop");
   const [currentIndex, setCurrentIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const currentIndexRef = useRef(0);
+  const validationId = useId();
+  const duration = durationInput === "" ? Number.NaN : Number(durationInput);
+  const fps = fpsInput === "" ? Number.NaN : Number(fpsInput);
+  const durationValid =
+    Number.isFinite(duration) && duration >= 0.1 && duration <= 3600;
+  const fpsValid = Number.isInteger(fps) && fps >= 1 && fps <= 240;
+  const previewFrameCount =
+    durationValid && fpsValid ? frameCount(duration, fps) : 0;
+  const overBudget = previewFrameCount > PREVIEW_FRAME_BUDGET;
+  const validationMessage = !durationValid
+    ? "时长必须是 0.1–3600 秒之间的有限数值。"
+    : !fpsValid
+      ? "帧率必须是 1–240 之间的整数。"
+      : overBudget
+        ? `浏览器预览最多支持 6,000 帧，当前设置需要 ${previewFrameCount.toLocaleString("zh-CN")} 帧。请缩短时长或降低帧率。`
+        : null;
 
-  const path = useMemo<CameraPathV1>(
-    () => ({
-      schema_version: 1,
-      frame: derivation.frame,
-      unit: derivation.unit,
-      trajectory_type: trajectoryType,
-      target_source: "manual",
-      target,
-      duration,
-      fps,
-      easing: "smoothstep",
-      loop_mode: loopMode,
-      projection: "perspective",
-      fov: 45,
-      ortho_scale: radius * 2,
-      parameters: { radius, turns: 1 },
-      keyframes: [],
-      sampler_version: "1",
-    }),
+  const path = useMemo<CameraPathV1 | null>(
+    () =>
+      validationMessage === null
+        ? {
+            schema_version: 1,
+            frame: derivation.frame,
+            unit: derivation.unit,
+            trajectory_type: trajectoryType,
+            target_source: "manual",
+            target,
+            duration,
+            fps,
+            easing: "smoothstep",
+            loop_mode: loopMode,
+            projection: "perspective",
+            fov: 45,
+            ortho_scale: radius * 2,
+            parameters: { radius, turns: 1 },
+            keyframes: [],
+            sampler_version: "1",
+          }
+        : null,
     [
       derivation.frame,
       derivation.unit,
@@ -86,26 +118,46 @@ export function TrajectoryPanel({
       radius,
       target,
       trajectoryType,
+      validationMessage,
     ],
   );
-  const poses = useMemo(() => sampleCameraPath(path), [path]);
+  const poses = useMemo(
+    () => (path === null ? [] : sampleCameraPath(path)),
+    [path],
+  );
+  const previewReady = viewerReady && poses.length > 0;
 
-  const applyPose = (index: number): void => {
-    const safeIndex = Math.min(poses.length - 1, Math.max(0, index));
-    currentIndexRef.current = safeIndex;
-    setCurrentIndex(safeIndex);
-    viewerRef.current?.setCameraPose(poses[safeIndex]);
-  };
+  const applyPose = useCallback(
+    (index: number): void => {
+      if (poses.length === 0 || !Number.isFinite(index)) return;
+      const safeIndex = Math.min(
+        poses.length - 1,
+        Math.max(0, Math.trunc(index)),
+      );
+      currentIndexRef.current = safeIndex;
+      setCurrentIndex(safeIndex);
+    },
+    [poses],
+  );
 
   useEffect(() => {
     setPlaying(false);
-    applyPose(0);
+    currentIndexRef.current = 0;
+    setCurrentIndex(0);
     // A new derivation or preset must start from its first deterministic pose.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path]);
+  }, [poses]);
 
   useEffect(() => {
-    if (!playing) return undefined;
+    if (!viewerReady) {
+      setPlaying(false);
+      return;
+    }
+    const pose = poses[currentIndexRef.current] ?? poses[0];
+    if (pose) viewerRef.current?.setCameraPose(pose);
+  }, [currentIndex, poses, viewerReady, viewerRef]);
+
+  useEffect(() => {
+    if (!playing || !previewReady) return undefined;
     let animationFrame = 0;
     const initialPhase =
       loopMode === "loop"
@@ -132,7 +184,7 @@ export function TrajectoryPanel({
     };
     animationFrame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animationFrame);
-  }, [duration, loopMode, playing, poses, viewerRef]);
+  }, [applyPose, duration, loopMode, playing, poses, previewReady]);
 
   const currentPose = poses[currentIndex] ?? poses[0];
   return (
@@ -142,7 +194,6 @@ export function TrajectoryPanel({
     >
       <div className="panel-heading">
         <div>
-          <span className="eyebrow">M3 PREVIEW</span>
           <h3 id="trajectory-title">轨迹预览</h3>
         </div>
         <Route size={17} />
@@ -175,15 +226,12 @@ export function TrajectoryPanel({
             min="0.1"
             max="3600"
             step="0.1"
-            value={duration}
+            value={durationInput}
+            aria-invalid={!durationValid || overBudget}
+            aria-describedby={validationMessage ? validationId : undefined}
             onChange={(event) => {
               setPlaying(false);
-              setDuration(
-                Math.min(
-                  3600,
-                  Math.max(0.1, Number(event.target.value) || 0.1),
-                ),
-              );
+              setDurationInput(event.target.value);
             }}
           />
         </label>
@@ -195,15 +243,12 @@ export function TrajectoryPanel({
             min="1"
             max="240"
             step="1"
-            value={fps}
+            value={fpsInput}
+            aria-invalid={!fpsValid || overBudget}
+            aria-describedby={validationMessage ? validationId : undefined}
             onChange={(event) => {
               setPlaying(false);
-              setFps(
-                Math.min(
-                  240,
-                  Math.max(1, Math.round(Number(event.target.value) || 1)),
-                ),
-              );
+              setFpsInput(event.target.value);
             }}
           />
         </label>
@@ -222,6 +267,11 @@ export function TrajectoryPanel({
           </select>
         </label>
       </div>
+      {validationMessage && (
+        <p id={validationId} className="diagnostic warning" role="alert">
+          {validationMessage}
+        </p>
+      )}
       <div className="trajectory-scrubber">
         <input
           aria-label="轨迹进度"
@@ -229,13 +279,15 @@ export function TrajectoryPanel({
           min="0"
           max={Math.max(poses.length - 1, 0)}
           value={currentIndex}
+          disabled={!previewReady}
           onChange={(event) => {
             setPlaying(false);
             applyPose(Number(event.target.value));
           }}
         />
         <span>
-          {currentPose.time.toFixed(2)} / {duration.toFixed(1)} s
+          {currentPose?.time.toFixed(2) ?? "—"} /{" "}
+          {durationValid ? duration.toFixed(1) : "—"} s
         </span>
       </div>
       <div className="trajectory-actions">
@@ -243,7 +295,16 @@ export function TrajectoryPanel({
           type="button"
           className="primary"
           aria-label={playing ? "暂停轨迹" : "播放轨迹"}
-          onClick={() => setPlaying((value) => !value)}
+          disabled={!previewReady}
+          onClick={() => {
+            if (
+              !playing &&
+              loopMode === "once" &&
+              currentIndexRef.current === poses.length - 1
+            )
+              applyPose(0);
+            setPlaying((value) => !value);
+          }}
         >
           {playing ? <Pause size={14} /> : <Play size={14} />}
           {playing ? "暂停" : "播放"}
@@ -253,6 +314,7 @@ export function TrajectoryPanel({
           className="secondary"
           aria-label="重置轨迹"
           title="重置轨迹"
+          disabled={!previewReady}
           onClick={() => {
             setPlaying(false);
             applyPose(0);
@@ -266,10 +328,16 @@ export function TrajectoryPanel({
         <span>目标（{derivation.unit}）</span>
         <code>{target.map((value) => value.toFixed(3)).join(", ")}</code>
         <span>预览采样</span>
-        <strong>{poses.length.toLocaleString()} 帧</strong>
+        <strong>
+          {poses.length > 0
+            ? `${poses.length.toLocaleString("zh-CN")} 帧`
+            : "未采样"}
+        </strong>
       </div>
       <p className="trajectory-note">
-        当前为浏览器视角预览；视频编码与任务队列仍未启用。轨迹不会修改点云派生结果。
+        {viewerReady
+          ? "仅预览相机轨迹，暂不支持视频编码。"
+          : "点云载入后可预览相机轨迹，暂不支持视频编码。"}
       </p>
     </section>
   );

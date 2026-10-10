@@ -5,10 +5,14 @@ import type { SceneSummary } from "../../web/src/api/types";
 import { useWorkbenchStore } from "../../web/src/state/workbench";
 import { App } from "../../web/src/app/App";
 
-const api = vi.hoisted(() => ({ listScenes: vi.fn() }));
+const api = vi.hoisted(() => ({
+  listScenes: vi.fn(),
+  reopenSceneImport: vi.fn(),
+}));
 vi.mock("../../web/src/api/client", () => ({
   listScenes: api.listScenes,
   createDerivation: vi.fn(),
+  reopenSceneImport: api.reopenSceneImport,
 }));
 vi.mock("../../web/src/features/import/ImportWizard", () => ({
   ImportWizard: ({ onCancel }: { onCancel?: () => void }) => (
@@ -19,8 +23,21 @@ vi.mock("../../web/src/features/import/ImportWizard", () => ({
   ),
 }));
 vi.mock("../../web/src/features/inspect/SceneInspector", () => ({
-  SceneInspector: ({ scene }: { scene: SceneSummary | null }) => (
-    <h2>{scene?.display_name}</h2>
+  SceneInspector: ({
+    scene,
+    onEditMetadata,
+    metadataBusy,
+  }: {
+    scene: SceneSummary | null;
+    onEditMetadata?: () => void;
+    metadataBusy?: boolean;
+  }) => (
+    <>
+      <h2>{scene?.display_name}</h2>
+      <button onClick={onEditMetadata} disabled={metadataBusy}>
+        编辑场景参数
+      </button>
+    </>
   ),
 }));
 function scene(id: string): SceneSummary {
@@ -51,6 +68,7 @@ beforeEach(() => {
   useWorkbenchStore.getState().reset();
   window.history.replaceState(null, "", "/");
   api.listScenes.mockReset();
+  api.reopenSceneImport.mockReset();
 });
 afterEach(cleanup);
 
@@ -83,4 +101,29 @@ it("shows a recoverable scene list error and retries without an unhandled reject
   await waitFor(() =>
     expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
   );
+});
+
+it("ignores an old metadata draft after selecting another scene", async () => {
+  api.listScenes.mockResolvedValue({
+    scenes: [scene("first"), scene("second")],
+  });
+  let finish!: (draft: { import_id: string }) => void;
+  api.reopenSceneImport.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByRole("heading", { name: "first" });
+  await user.click(screen.getByRole("button", { name: "编辑场景参数" }));
+  const signal = api.reopenSceneImport.mock.calls[0][1] as AbortSignal;
+  await user.selectOptions(screen.getByLabelText("当前场景"), "second");
+  expect(signal.aborted).toBe(true);
+  finish({ import_id: "old-draft" });
+  await waitFor(() =>
+    expect(screen.getByRole("heading", { name: "second" })).toBeInTheDocument(),
+  );
+  expect(screen.queryByLabelText("导入向导")).not.toBeInTheDocument();
 });

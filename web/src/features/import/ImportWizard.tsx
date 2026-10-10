@@ -106,6 +106,7 @@ export function ImportWizard({
   const [manifest, setManifest] = useState<File | undefined>();
   const [probe, setProbe] = useState<ProbeResponse | null>(null);
   const [metadata, setMetadata] = useState<MetadataPayload>({});
+  const [invalidValuesInput, setInvalidValuesInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmedImportId, setConfirmedImportId] = useState<string | null>(
@@ -152,7 +153,10 @@ export function ImportWizard({
   ): void => {
     setProbe(result);
     const sceneMetadata = result.scene ? metadataFromScene(result.scene) : {};
-    if (hydrateMetadata && result.scene) setMetadata(sceneMetadata);
+    if (hydrateMetadata && result.scene) {
+      setMetadata(sceneMetadata);
+      setInvalidValuesInput(sceneMetadata.invalid_values?.join(", ") ?? "");
+    }
     if (resetSections) setGeometryExpanded(!sceneMetadata.camera);
     setConfirmedImportId(result.scene?.depth_spec ? result.import_id : null);
     setMetadataDirty(false);
@@ -165,6 +169,7 @@ export function ImportWizard({
     setBusy(false);
     setProbe(null);
     setMetadata({});
+    setInvalidValuesInput("");
     setConfirmedImportId(null);
     setMetadataDirty(false);
     setError(null);
@@ -181,6 +186,7 @@ export function ImportWizard({
     }
     setProbe(null);
     setMetadata({});
+    setInvalidValuesInput("");
     setConfirmedImportId(null);
     setMetadataDirty(false);
     const { controller, requestRevision } = beginRequest();
@@ -270,7 +276,7 @@ export function ImportWizard({
 
   const confirm = async (): Promise<void> => {
     if (!probe) return;
-    const semanticsError = depthSemanticsIssue(metadata);
+    const semanticsError = depthSemanticsIssue(metadata) ?? invalidValuesIssue;
     if (semanticsError) {
       setError(semanticsError);
       return;
@@ -316,6 +322,7 @@ export function ImportWizard({
         setDepth(null);
         setManifest(undefined);
         setMetadata({});
+        setInvalidValuesInput("");
         setConfirmedImportId(null);
         setMetadataDirty(false);
         if (rgbInput.current) rgbInput.current.value = "";
@@ -332,7 +339,12 @@ export function ImportWizard({
     }
   };
 
-  const semanticsError = depthSemanticsIssue(metadata);
+  const invalidValuesIssue = metadata.invalid_values?.some(
+    (value) => !Number.isFinite(value),
+  )
+    ? "无效值必须是有限数值，用逗号分隔，例如 0, -9999。"
+    : null;
+  const semanticsError = depthSemanticsIssue(metadata) ?? invalidValuesIssue;
   const semanticsConfirmed = Boolean(
     probe && confirmedImportId === probe.import_id,
   );
@@ -693,7 +705,7 @@ export function ImportWizard({
                       <input
                         aria-label={`相机 ${field}`}
                         type="number"
-                        min="0"
+                        min={field === "cx" || field === "cy" ? undefined : "0"}
                         step="any"
                         value={cameraDraft[field] ?? ""}
                         onChange={(event) =>
@@ -742,17 +754,20 @@ export function ImportWizard({
                   aria-label="深度无效值"
                   type="text"
                   placeholder="例如 0"
-                  value={metadata.invalid_values?.join(", ") ?? ""}
-                  onChange={(event) =>
+                  value={invalidValuesInput}
+                  aria-invalid={Boolean(invalidValuesIssue)}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setInvalidValuesInput(value);
                     updateMetadata({
-                      invalid_values: event.target.value
-                        ? event.target.value
+                      invalid_values: value.trim()
+                        ? value
                             .split(",")
+                            .filter((part) => part.trim() !== "")
                             .map(Number)
-                            .filter(Number.isFinite)
                         : [],
-                    })
-                  }
+                    });
+                  }}
                 />
               </label>
             </div>

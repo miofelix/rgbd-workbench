@@ -1,5 +1,5 @@
 import { Camera, Download } from "lucide-react";
-import type { RefObject } from "react";
+import { type RefObject, useState } from "react";
 
 import type { DerivationResponse } from "../../api/types";
 import type { PointCloudViewerHandle } from "./PointCloudViewer";
@@ -8,6 +8,7 @@ interface ExportActionsProps {
   urls: DerivationResponse["urls"];
   viewerRef: RefObject<PointCloudViewerHandle | null>;
   displayName: string;
+  ready?: boolean;
 }
 
 function safeName(value: string): string {
@@ -18,15 +19,23 @@ export function ExportActions({
   urls,
   viewerRef,
   displayName,
+  ready = true,
 }: ExportActionsProps): React.JSX.Element {
   const name = safeName(displayName);
+  const [error, setError] = useState<string | null>(null);
   const downloadPng = (): void => {
-    const dataUrl = viewerRef.current?.capturePng();
-    if (!dataUrl) return;
-    const anchor = document.createElement("a");
-    anchor.href = dataUrl;
-    anchor.download = `${name}-pointcloud.png`;
-    anchor.click();
+    if (!ready) return;
+    setError(null);
+    try {
+      const dataUrl = viewerRef.current?.capturePng();
+      if (!dataUrl) throw new Error("Point-cloud view is not ready");
+      const anchor = document.createElement("a");
+      anchor.href = dataUrl;
+      anchor.download = `${name}-pointcloud.png`;
+      anchor.click();
+    } catch {
+      setError("截图失败，请重试。");
+    }
   };
   return (
     <section
@@ -53,11 +62,18 @@ export function ExportActions({
           type="button"
           className="secondary"
           aria-label="下载 PNG"
+          disabled={!ready}
+          title={ready ? "保存当前点云视图" : "等待点云加载完成"}
           onClick={downloadPng}
         >
           <Camera size={14} /> 下载 PNG
         </button>
       </div>
+      {error && (
+        <p className="notice error" role="alert">
+          {error}
+        </p>
+      )}
     </section>
   );
 }

@@ -470,6 +470,33 @@ describe("ImportWizard", () => {
       expect.any(AbortSignal),
     );
   });
+  it("allows negative invalid values to be typed and rejects malformed values", async () => {
+    const user = userEvent.setup();
+    render(<ImportWizard onCommitted={vi.fn()} initialImportId="imp-1" />);
+    await screen.findByLabelText("深度表示");
+    await user.selectOptions(screen.getByLabelText("深度表示"), "relative_z");
+    await user.click(screen.getByText("更多深度设置"));
+    await user.type(screen.getByLabelText("深度无效值"), "-9999, 0,");
+    expect(screen.getByLabelText("深度无效值")).toHaveValue("-9999, 0,");
+    await user.click(screen.getByRole("button", { name: "确认参数" }));
+    expect(apiMocks.confirmImport).toHaveBeenCalledWith(
+      "imp-1",
+      expect.objectContaining({ invalid_values: [-9999, 0] }),
+      expect.any(AbortSignal),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "确认参数" }),
+      ).not.toBeDisabled(),
+    );
+    await user.clear(screen.getByLabelText("深度无效值"));
+    await user.type(screen.getByLabelText("深度无效值"), "bad");
+    expect(screen.getByRole("button", { name: "确认参数" })).toBeDisabled();
+    expect(screen.getByLabelText("深度无效值")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+  });
 });
 
 function uploadPair(): void {

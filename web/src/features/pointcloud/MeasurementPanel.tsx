@@ -1,4 +1,5 @@
 import { Copy, Ruler, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import type { SelectedPoint } from "../../api/types";
 
@@ -17,6 +18,17 @@ export function MeasurementPanel({
   onClear,
   embedded = false,
 }: MeasurementPanelProps): React.JSX.Element {
+  const [copyStatus, setCopyStatus] = useState<
+    "copying" | "copied" | "failed" | null
+  >(null);
+  const copyRequest = useRef(0);
+  useEffect(() => {
+    copyRequest.current += 1;
+    setCopyStatus(null);
+    return () => {
+      copyRequest.current += 1;
+    };
+  }, [points]);
   const distance =
     points.length === 2
       ? Math.hypot(
@@ -26,6 +38,19 @@ export function MeasurementPanel({
         )
       : null;
   const unit = points[0]?.unit;
+  const copyDistance = async (): Promise<void> => {
+    if (distance === null || unit !== "m") return;
+    const requestId = ++copyRequest.current;
+    setCopyStatus("copying");
+    try {
+      if (!navigator.clipboard?.writeText)
+        throw new Error("Clipboard is unavailable");
+      await navigator.clipboard.writeText(distance.toFixed(6));
+      if (requestId === copyRequest.current) setCopyStatus("copied");
+    } catch {
+      if (requestId === copyRequest.current) setCopyStatus("failed");
+    }
+  };
 
   return (
     <section
@@ -67,9 +92,8 @@ export function MeasurementPanel({
                 className="secondary"
                 aria-label="复制米制距离"
                 title="复制米制距离"
-                onClick={() =>
-                  void navigator.clipboard?.writeText(distance.toFixed(6))
-                }
+                disabled={copyStatus === "copying"}
+                onClick={() => void copyDistance()}
               >
                 <Copy size={14} /> 复制米制距离
               </button>
@@ -83,6 +107,16 @@ export function MeasurementPanel({
               <X size={14} /> 清除选点
             </button>
           </div>
+          {copyStatus === "copied" && (
+            <p className="field-hint" role="status">
+              已复制米制距离。
+            </p>
+          )}
+          {copyStatus === "failed" && (
+            <p className="notice error" role="alert">
+              复制失败，请检查剪贴板权限后重试。
+            </p>
+          )}
         </>
       )}
     </section>

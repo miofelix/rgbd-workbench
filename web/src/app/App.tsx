@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { reopenSceneImport } from "../api/client";
 import { ImportWizard } from "../features/import/ImportWizard";
 import { SceneInspector } from "../features/inspect/SceneInspector";
 import { useWorkbenchStore } from "../state/workbench";
@@ -35,11 +36,21 @@ export function App(): React.JSX.Element {
   const [importOpen, setImportOpen] = useState(Boolean(initialImportId));
   const [importRevision, setImportRevision] = useState(0);
   const importContainer = useRef<HTMLDivElement>(null);
+  const metadataRequest = useRef<AbortController | null>(null);
+  const [metadataBusy, setMetadataBusy] = useState(false);
+  const [metadataError, setMetadataError] = useState<string | null>(null);
+  const [editingSceneName, setEditingSceneName] = useState<string | null>(null);
   const showImport = importOpen || (!appliedScene && !scenesLoading);
 
   useEffect(() => {
     void loadScenes();
   }, [loadScenes]);
+  useEffect(
+    () => () => {
+      metadataRequest.current?.abort();
+    },
+    [],
+  );
   useEffect(() => {
     if (showImport)
       importContainer.current
@@ -48,6 +59,10 @@ export function App(): React.JSX.Element {
   }, [showImport, importRevision]);
 
   const closeImport = (): void => {
+    metadataRequest.current?.abort();
+    setMetadataBusy(false);
+    setMetadataError(null);
+    setEditingSceneName(null);
     setImportOpen(false);
     setInitialImportId(undefined);
     const url = new URL(window.location.href);
@@ -55,8 +70,52 @@ export function App(): React.JSX.Element {
     window.history.replaceState(null, "", url);
   };
   const openImport = (): void => {
+    if (showImport && !initialImportId) {
+      setImportOpen(true);
+      importContainer.current?.scrollIntoView({ behavior: "smooth" });
+      importContainer.current
+        ?.querySelector<HTMLInputElement>("input")
+        ?.focus();
+      return;
+    }
+    metadataRequest.current?.abort();
+    setMetadataBusy(false);
+    setMetadataError(null);
+    setEditingSceneName(null);
+    setInitialImportId(undefined);
     setImportOpen(true);
     setImportRevision((value) => value + 1);
+  };
+  const editMetadata = async (): Promise<void> => {
+    if (!appliedScene) return;
+    const scene = appliedScene;
+    metadataRequest.current?.abort();
+    const controller = new AbortController();
+    metadataRequest.current = controller;
+    setMetadataBusy(true);
+    setMetadataError(null);
+    try {
+      const draft = await reopenSceneImport(scene.scene_id, controller.signal);
+      if (
+        controller.signal.aborted ||
+        useWorkbenchStore.getState().activeSceneId !== scene.scene_id
+      )
+        return;
+      setInitialImportId(draft.import_id);
+      setEditingSceneName(scene.display_name);
+      setImportOpen(true);
+      setImportRevision((value) => value + 1);
+    } catch (cause) {
+      if (
+        !controller.signal.aborted &&
+        useWorkbenchStore.getState().activeSceneId === scene.scene_id
+      )
+        setMetadataError(
+          cause instanceof Error ? cause.message : "请检查本地服务后重试。",
+        );
+    } finally {
+      if (metadataRequest.current === controller) setMetadataBusy(false);
+    }
   };
 
   return (
@@ -82,7 +141,7 @@ export function App(): React.JSX.Element {
           <button
             type="button"
             className="secondary top-action"
-            disabled={!appliedDerivation}
+            disabled={!appliedDerivation || showImport}
             onClick={() => {
               const exports = document.getElementById("static-exports");
               exports?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -204,7 +263,10 @@ export function App(): React.JSX.Element {
               type="button"
               className={activeMode === "inspect" ? "active" : ""}
               aria-current={activeMode === "inspect" ? "page" : undefined}
-              onClick={() => setMode("inspect")}
+              onClick={() => {
+                setMode("inspect");
+                if (appliedScene) closeImport();
+              }}
             >
               <LayoutGrid size={18} />
               <span>
@@ -216,7 +278,10 @@ export function App(): React.JSX.Element {
               className={activeMode === "compare" ? "active" : ""}
               aria-current={activeMode === "compare" ? "page" : undefined}
               disabled={!appliedScene}
-              onClick={() => setMode("compare")}
+              onClick={() => {
+                setMode("compare");
+                closeImport();
+              }}
             >
               <Settings2 size={18} />
               <span>
@@ -228,7 +293,10 @@ export function App(): React.JSX.Element {
               className={activeMode === "trajectory" ? "active" : ""}
               aria-current={activeMode === "trajectory" ? "page" : undefined}
               disabled={!appliedScene}
-              onClick={() => setMode("trajectory")}
+              onClick={() => {
+                setMode("trajectory");
+                closeImport();
+              }}
             >
               <Route size={18} />
               <span>
@@ -248,10 +316,14 @@ export function App(): React.JSX.Element {
           )}
           {showImport ? (
             <div className="import-workspace" ref={importContainer}>
+              {editingSceneName && (
+                <p className="notice" role="status">
+                  正在编辑“{editingSceneName}”的参数。保存后创建新场景。
+                </p>
+              )}
               <ImportWizard
                 key={importRevision}
                 initialImportId={initialImportId}
-                activeSceneId={initialImportId ? undefined : activeSceneId}
                 onCancel={appliedScene ? closeImport : undefined}
                 onProbed={setImportSession}
                 onCommitted={(scene) => {
@@ -269,7 +341,19 @@ export function App(): React.JSX.Element {
               )}
             </div>
           ) : (
-            <SceneInspector scene={appliedScene} mode={activeMode} />
+            <>
+              {metadataError && (
+                <p className="notice error" role="alert">
+                  无法打开参数草稿：{metadataError}
+                </p>
+              )}
+              <SceneInspector
+                scene={appliedScene}
+                mode={activeMode}
+                onEditMetadata={() => void editMetadata()}
+                metadataBusy={metadataBusy}
+              />
+            </>
           )}
         </main>
       </div>

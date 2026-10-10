@@ -52,6 +52,6 @@ target-version = "py311"
 select = ["E", "F", "I", "UP"]
 
 [tool.mypy]
-python_version = "3.11"
+# Follow the active interpreter so installed scientific-library stubs can be parsed.
 strict = true
 packages = ["rgbd_workbench"]

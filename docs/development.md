@@ -66,3 +66,20 @@ point-cloud array, a sampled `CameraPose` and `RenderSpecV1`, then returns an RG
 source-frame camera math, deterministic point-budget sampling and source-pixel z-buffer tie-breaking.
 `encode_png()` is intentionally a pure in-memory encoder; video jobs, frame publication and SSE remain
 out of scope until the renderer is integrated with the job lifecycle.
+
+## Design refinement acceptance
+
+See [design-refinement.md](design-refinement.md) for the three-stage scope. The expanded browser suite
+also verifies completing saved-scene metadata as a new scene, retrying a failed point-cloud download,
+keeping the applied derivation when returning from import, export access from trajectory mode, and
+all analysis modes at 320, 390, 768 and 1440px. Screenshots are written under `test-results/design-*`.
+
+Focused frontend tests cover processing validation/recovery, import cancellation and late responses,
+viewer readiness, drag-versus-click selection, PNG and clipboard feedback, and the trajectory frame
+budget. `tests/python/test_scene_metadata_imports.py` covers authenticated scene reopening, explicit
+semantics, Managed/Linked source validation, RAW metadata, independent commits and failure cleanup.
+
+Mypy uses the current environment's Python version so it can parse the installed NumPy/SciPy type
+stubs. The package still requires Python 3.11 or later and Ruff checks project syntax against 3.11.
+On minimal Linux installations install Chromium system dependencies with
+`npx playwright install --with-deps chromium` before running browser acceptance.

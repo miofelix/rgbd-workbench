@@ -31,6 +31,27 @@ repository.
 Full trajectory editing, camera-path persistence, video rendering, SSE jobs and workspace packaging remain
 later M3 capabilities; the current preview is intentionally local to the applied derivation.
 
+## Working in the UI
+
+The workspace opens on your saved scene, or on import when it is empty. Use **Import** to add another
+RGB-D pair; saving returns to inspection. The scene selector stays available on phones.
+
+Start with the input images and expandable data checks. Apply the four common processing controls to
+create geometry; ROI, XYZ clipping, voxel reduction and KNN operations are under advanced processing.
+Metric processing ranges are expressed in normalized meters, including when source depth is in
+millimeters. Relative geometry keeps its `unitless` labels. Draft changes affect measurements and
+exports only after applying them, and can be restored to the last applied parameters or defaults.
+
+Use **Edit parameters** to reopen a saved scene as an independent draft. This lets an inspection-only
+scene gain explicitly supplied camera, alignment and depth metadata. Saving creates a new scene and
+keeps the previous scene available. Managed files are copied into the draft; Linked files keep their
+validated private references.
+
+Comparison remains available for two-dimensional inspection. Static PLY/JSON exports are available in
+all analysis modes; PNG capture and camera playback wait for the point-cloud viewer to load. Failed
+probes and point-cloud loads can be retried. Camera trajectory previews support up to 6,000 frames;
+shorten the duration or reduce the frame rate when a setting exceeds that browser preview budget.
+
 ## Install
 
 Python 3.11+ and Node.js 24 LTS are supported on macOS and Linux.

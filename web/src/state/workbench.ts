@@ -76,6 +76,8 @@ const DEFAULT_VIEW: ViewSpec = {
   background: "dark",
 };
 
+let sceneLoadRevision = 0;
+
 let activeDerivationRequest: AbortController | null = null;
 
 const freshProcessing = (): ProcessingSpec => ({ ...DEFAULT_PROCESSING });
@@ -109,6 +111,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     activeDerivationRequest = null;
     set({
       ...initialState,
+      requestRevision: ++sceneLoadRevision,
       draftProcessing: freshProcessing(),
       viewSpec: { ...DEFAULT_VIEW },
       scenes: [],
@@ -240,7 +243,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     }
   },
   loadScenes: async (loader: SceneLoader = listScenes) => {
-    const revision = get().requestRevision + 1;
+    const revision = ++sceneLoadRevision;
     set({ requestRevision: revision, scenesLoading: true, scenesError: null });
     try {
       const result = await loader();

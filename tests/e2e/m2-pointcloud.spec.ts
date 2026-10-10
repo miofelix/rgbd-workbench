@@ -167,3 +167,129 @@ test("previews a camera trajectory from the applied derivation", async ({
   await page.getByRole("button", { name: "重置轨迹" }).click();
   await expect(page.getByRole("button", { name: "播放轨迹" })).toBeVisible();
 });
+
+test("reopens an inspection-only scene and completes geometry as a new scene", async ({
+  page,
+}) => {
+  await page.goto("/?token=e2e-token");
+  await page.getByRole("button", { name: "导入", exact: true }).click();
+  await page.setInputFiles('input[aria-label="RGB 图像文件"]', {
+    name: "rgb.png",
+    mimeType: "image/png",
+    buffer: rgbPng,
+  });
+  await page.setInputFiles('input[aria-label="深度数据文件"]', {
+    name: "depth.npy",
+    mimeType: "application/octet-stream",
+    buffer: npyFloat32([1, 1, 1, 1], [2, 2]),
+  });
+  await page.getByLabel("深度表示").selectOption("z_depth");
+  await page.getByLabel("单位").selectOption("m");
+  await page.getByLabel("Scene 显示名称").fill("Inspection only");
+  await page.getByRole("button", { name: "确认参数" }).click();
+  await page.getByRole("button", { name: "保存 Scene" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Inspection only" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "应用处理" })).toBeDisabled();
+  const originalId = await page.getByLabel("当前场景").inputValue();
+
+  await page.getByRole("button", { name: "编辑场景参数" }).click();
+  await expect(page.getByText(/保存后创建新场景/)).toBeVisible();
+  await expect(page.getByLabel("单位")).toHaveValue("m");
+  await page.getByLabel("Scene 显示名称").fill("Completed geometry");
+  await page.getByLabel("对齐状态").selectOption("registered_to_rgb");
+  for (const [field, value] of Object.entries({
+    width: 2,
+    height: 2,
+    fx: 2,
+    fy: 2,
+    cx: 0.5,
+    cy: 0.5,
+  })) {
+    await page.getByLabel(`相机 ${field}`, { exact: true }).fill(String(value));
+  }
+  await page.getByLabel("相机畸变模型").selectOption("none");
+  await page.getByRole("button", { name: "确认参数" }).click();
+  await page.getByRole("button", { name: "保存 Scene" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Completed geometry" }),
+  ).toBeVisible();
+  await expect(page.getByText("米制几何可用")).toBeVisible();
+  const completedId = await page.getByLabel("当前场景").inputValue();
+  expect(completedId).not.toBe(originalId);
+  await applyAndSelectTwoPoints(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByLabel("当前场景").selectOption(originalId);
+  await expect(page.getByRole("button", { name: "应用处理" })).toBeDisabled();
+  await page.getByLabel("当前场景").selectOption(completedId);
+  await expect(
+    page.getByRole("heading", { name: "Completed geometry" }),
+  ).toBeVisible();
+});
+
+test("recovers a failed point-cloud download and preserves analysis through navigation", async ({
+  page,
+}) => {
+  let fail = true;
+  await page.route("**/pointcloud", async (route) => {
+    if (fail) {
+      fail = false;
+      await route.abort("failed");
+    } else await route.continue();
+  });
+  await importScene(page, "z_depth");
+  await page.getByRole("button", { name: "应用处理" }).click();
+  await expect(page.getByRole("alert")).toContainText("无法加载点云");
+  await expect(page.getByRole("button", { name: "下载 PNG" })).toBeDisabled();
+  await page.getByRole("button", { name: "重新加载点云" }).click();
+  await expect(page.getByRole("button", { name: "下载 PNG" })).toBeEnabled();
+  await page.locator(".scene-row[aria-current='true']").click();
+  await expect(page.getByRole("button", { name: "下载 PNG" })).toBeEnabled();
+  await page.getByRole("button", { name: "导入", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "导出", exact: true }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: /检查与测量/ }).click();
+  await expect(page.getByRole("button", { name: "下载 PNG" })).toBeEnabled();
+  await page.getByRole("button", { name: /轨迹预览/ }).click();
+  await expect(page.getByRole("button", { name: "播放轨迹" })).toBeEnabled();
+  await page.getByRole("button", { name: "导出", exact: true }).click();
+  await expect(page.getByRole("link", { name: "下载 PLY" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "正交投影" })).toBeDisabled();
+  await page.getByLabel("轨迹时长").fill("3600");
+  await expect(page.getByRole("alert")).toContainText("最多支持 6,000 帧");
+  await expect(page.getByRole("button", { name: "播放轨迹" })).toBeDisabled();
+  await page.getByLabel("轨迹时长").fill("5");
+  await expect(page.getByRole("button", { name: "播放轨迹" })).toBeEnabled();
+});
+
+test("keeps all analysis modes usable from small phones to desktop", async ({
+  page,
+}) => {
+  await importScene(page, "relative_z");
+  await page.getByRole("button", { name: "应用处理" }).click();
+  await expect(page.getByRole("button", { name: "下载 PNG" })).toBeEnabled();
+  for (const width of [320, 390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const mode of ["检查与测量", "四视图对照", "轨迹预览"]) {
+      await page.getByRole("button", { name: new RegExp(mode) }).click();
+      await expect(
+        page.getByRole("button", { name: "下载 PNG" }),
+      ).toBeEnabled();
+      expect(
+        await page.evaluate(
+          () =>
+            document.documentElement.scrollWidth >
+            document.documentElement.clientWidth,
+        ),
+      ).toBe(false);
+      if (width === 390 || width === 1440) {
+        await page.screenshot({
+          path: `test-results/design-${width}-${mode}.png`,
+          fullPage: true,
+        });
+      }
+    }
+  }
+});

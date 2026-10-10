@@ -1,5 +1,5 @@
 import { ScanLine } from "lucide-react";
-import { useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { scenePreviewUrl } from "../../api/client";
 import type { SceneSummary } from "../../api/types";
@@ -19,13 +19,18 @@ import { StatisticsPanel } from "./StatisticsPanel";
 interface SceneInspectorProps {
   scene: SceneSummary | null;
   mode: "inspect" | "compare" | "trajectory";
+  onEditMetadata?: () => void;
+  metadataBusy?: boolean;
 }
 
 export function SceneInspector({
   scene,
   mode,
+  onEditMetadata,
+  metadataBusy = false,
 }: SceneInspectorProps): React.JSX.Element {
   const viewerRef = useRef<PointCloudViewerHandle>(null);
+  const [readyViewer, setReadyViewer] = useState<string | null>(null);
   const {
     appliedDerivation,
     appliedDerivationUrls,
@@ -35,6 +40,12 @@ export function SceneInspector({
     viewSpec,
     setViewSpec,
   } = useWorkbenchStore();
+  const viewerKey = `${scene?.scene_id}-${appliedDerivation?.derivation_id}-${mode}`;
+  const viewerReady = readyViewer === viewerKey;
+  const handleReady = useCallback(
+    (ready: boolean) => setReadyViewer(ready ? viewerKey : null),
+    [viewerKey],
+  );
   if (!scene)
     return (
       <section className="empty-workspace">
@@ -59,15 +70,21 @@ export function SceneInspector({
         pointcloudUrl={currentUrls.pointcloud}
         onPointSelected={selectPoint}
         selectedPoints={selectedPoints}
-        viewSpec={viewSpec}
+        viewSpec={
+          mode === "trajectory"
+            ? { ...viewSpec, projection: "perspective" }
+            : viewSpec
+        }
+        projectionLocked={mode === "trajectory"}
         onViewSpecChange={setViewSpec}
+        onReadyChange={handleReady}
       />
     ) : null;
   const selectImagePixel = (pixelIndex: number): void => {
     const selected = viewerRef.current?.selectPixel(pixelIndex);
     if (selected) selectPoint(selected);
   };
-  const processing = (
+  const processingPanel = (
     <ProcessingPanel
       enabled={geometryReady}
       sourceWidth={sourceWidth}
@@ -75,11 +92,22 @@ export function SceneInspector({
       unit={metric ? "m" : "unitless"}
     />
   );
+  const processing = currentDerivation ? (
+    <details className="processing-section panel">
+      <summary>
+        处理参数 <span>已应用 · 展开调整</span>
+      </summary>
+      {processingPanel}
+    </details>
+  ) : (
+    processingPanel
+  );
   const exports = currentUrls ? (
     <ExportActions
       urls={currentUrls}
       viewerRef={viewerRef}
       displayName={scene.display_name}
+      ready={viewerReady}
     />
   ) : null;
   const derivationPrompt = (
@@ -105,11 +133,28 @@ export function SceneInspector({
           <span className="eyebrow">当前场景</span>
           <h2>{scene.display_name}</h2>
         </div>
-        <span
-          className={`capability-pill ${geometryReady ? "ready" : "pending"}`}
-        >
-          {metric ? "米制几何可用" : relative ? "相对几何可用" : "二维查看"}
-        </span>
+        <div className="scene-toolbar-actions">
+          <span
+            className={`capability-pill ${geometryReady ? "ready" : "pending"}`}
+          >
+            {metric ? "米制几何可用" : relative ? "相对几何可用" : "二维查看"}
+          </span>
+          {onEditMetadata && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={onEditMetadata}
+              disabled={metadataBusy}
+              aria-label="编辑场景参数"
+            >
+              {metadataBusy
+                ? "正在打开…"
+                : geometryReady
+                  ? "编辑参数"
+                  : "补全参数"}
+            </button>
+          )}
+        </div>
       </div>
       <SceneDetails
         key={scene.scene_id}
@@ -258,6 +303,7 @@ export function SceneInspector({
                 <TrajectoryPanel
                   derivation={currentDerivation}
                   viewerRef={viewerRef}
+                  viewerReady={viewerReady}
                 />
               </div>
               {exports}

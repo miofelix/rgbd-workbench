@@ -75,6 +75,7 @@ class ImportSession:
     metadata: MetadataUpdate | None = None
     scene: SceneManifestV1 | None = None
     diagnostics: list[Diagnostic] = field(default_factory=list)
+    source_scene: SceneManifestV1 | None = None
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -171,6 +172,27 @@ def _candidate_summary(
         "source": _source_summary(candidate.source),
         "metadata": redacted_metadata(candidate.metadata),
         "diagnostics": _diagnostics(diagnostics),
+    }
+
+
+def _import_payload(session: ImportSession) -> dict[str, Any]:
+    report = capability_report(session.scene, session.diagnostics) if session.scene else None
+    return {
+        "schema_version": 1,
+        "import_id": session.import_id,
+        **({"source_scene_id": session.source_scene.scene_id} if session.source_scene else {}),
+        "candidates": {
+            role: _candidate_summary(candidate, session.scene)
+            for role, candidate in session.candidates.items()
+        },
+        "manifest": (
+            _candidate_summary(session.manifest_candidate, session.scene)
+            if session.manifest_candidate
+            else None
+        ),
+        "scene": _scene_summary(session.scene, session.diagnostics) if session.scene else None,
+        "diagnostics": _diagnostics(session.diagnostics),
+        "capabilities": report.model_dump() if report else {},
     }
 
 
@@ -357,7 +379,12 @@ def _build_scene(session: ImportSession) -> SceneManifestV1:
         raise ValueError("representation is required when depth semantics are supplied")
     rgb = session.candidates["rgb"].source
     depth = session.candidates["depth"].source
-    raw_descriptor = _raw_descriptor_from_manifest(session.manifest_candidate)
+    source_scene = session.source_scene
+    raw_descriptor = (
+        source_scene.raw_descriptor
+        if source_scene is not None
+        else _raw_descriptor_from_manifest(session.manifest_candidate)
+    )
     if session.manifest_candidate is not None:
         manifest_depth = session.manifest_candidate.metadata.get("depth")
         manifest_shape = (
@@ -388,8 +415,14 @@ def _build_scene(session: ImportSession) -> SceneManifestV1:
         depth_spec=depth_spec,
         camera=metadata.camera,
         alignment=metadata.alignment,
-        normalizer_version="1",
-        adapter_versions={"rgb": "1", "depth": "1"},
+        frame_id=source_scene.frame_id if source_scene else "camera",
+        coordinate_convention=(
+            source_scene.coordinate_convention if source_scene else "x_right_y_down_z_forward"
+        ),
+        normalizer_version=source_scene.normalizer_version if source_scene else "1",
+        adapter_versions=(
+            source_scene.adapter_versions if source_scene else {"rgb": "1", "depth": "1"}
+        ),
         diagnostics=session.diagnostics,
         raw_descriptor=raw_descriptor,
     )
@@ -424,6 +457,21 @@ def _metadata_from_manifest(candidate: ProbeCandidate) -> MetadataUpdate:
     }
     return MetadataUpdate.model_validate(
         {key: value for key, value in payload.items() if value is not None}
+    )
+
+
+def _metadata_from_scene(scene: SceneManifestV1) -> MetadataUpdate:
+    depth = scene.depth_spec
+    return MetadataUpdate(
+        display_name=scene.display_name,
+        representation=depth.representation if depth else None,
+        unit=depth.unit if depth else None,
+        scale_to_meter=depth.scale_to_meter if depth else None,
+        invalid_values=list(depth.invalid_values) if depth else [],
+        valid_min=depth.valid_min if depth else None,
+        valid_max=depth.valid_max if depth else None,
+        camera=scene.camera.model_copy(deep=True) if scene.camera else None,
+        alignment=scene.alignment.model_copy(deep=True) if scene.alignment else None,
     )
 
 
@@ -662,6 +710,96 @@ def create_app(
             raise HTTPException(status_code=404, detail="scene not found") from exc
         diagnostics = store.revalidate_scene(scene_id)
         return {"schema_version": 1, "scene": _scene_summary(scene, diagnostics)}
+
+    @app.post(
+        "/api/v1/scenes/{scene_id}/imports",
+        status_code=201,
+        dependencies=[Depends(require_session)],
+    )
+    async def reopen_scene_import(scene_id: str) -> JSONResponse:
+        """Create a new import draft; the saved Scene and its sources remain immutable."""
+        try:
+            scene = store.get_scene(scene_id)
+        except (ValueError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail="scene not found") from exc
+        staged: dict[str, StagedFile] = {}
+        sources: dict[str, SourceRef] = {}
+        try:
+            staged, sources = store.clone_scene_sources(scene_id, max_upload_bytes)
+            candidates: dict[str, ProbeCandidate] = {}
+            for role in ("rgb", "depth"):
+                path = (
+                    staged[role].path
+                    if role in staged
+                    else store.resolve_scene_source(scene_id, role)
+                )
+                candidate = registry.probe(
+                    path,
+                    role,
+                    raw_descriptor=(
+                        scene.raw_descriptor.model_dump()
+                        if role == "depth" and scene.raw_descriptor
+                        else None
+                    ),
+                )
+                candidates[role] = ProbeCandidate(
+                    role=candidate.role,
+                    source=sources[role],
+                    metadata=candidate.metadata,
+                    diagnostics=candidate.diagnostics,
+                    path=path,
+                )
+            import_id = secrets.token_hex(12)
+            session = ImportSession(
+                import_id=import_id,
+                staged=staged,
+                candidates=candidates,
+                metadata=_metadata_from_scene(scene),
+                diagnostics=[
+                    *scene.diagnostics,
+                    *(item for candidate in candidates.values() for item in candidate.diagnostics),
+                ],
+                source_scene=scene.model_copy(deep=True),
+            )
+            session.scene = _build_scene(session)
+            session.diagnostics = _effective_diagnostics(session.scene, session.diagnostics)
+            session.scene = session.scene.model_copy(update={"diagnostics": session.diagnostics})
+            store.resolve_scene_source(scene_id, "rgb")
+            store.resolve_scene_source(scene_id, "depth")
+            response = JSONResponse(status_code=201, content=_import_payload(session))
+            imports[import_id] = session
+            return response
+        except SceneSourceError as exc:
+            store.discard_import_sources(staged, sources)
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "diagnostics": _diagnostics(
+                        [
+                            Diagnostic(
+                                code=exc.code,
+                                severity="fatal",
+                                field="scene.source",
+                                message="Scene source is stale or missing.",
+                                hint="Restore the original source or import a new RGB-D pair.",
+                                capability=None,
+                            )
+                        ]
+                    )
+                },
+            )
+        except (ValueError, OSError) as exc:
+            store.discard_import_sources(staged, sources)
+            if isinstance(exc, ValueError) and "byte limit" in str(exc):
+                raise HTTPException(
+                    status_code=413, detail="scene source exceeds configured byte limit"
+                ) from exc
+            raise HTTPException(
+                status_code=422, detail="scene import could not be created"
+            ) from exc
+        except Exception:
+            store.discard_import_sources(staged, sources)
+            raise
 
     @app.get("/api/v1/scenes/{scene_id}/preview/{role}", dependencies=[Depends(require_session)])
     async def scene_preview(scene_id: str, role: str) -> Response:
@@ -964,23 +1102,7 @@ def create_app(
         session = imports.get(import_id)
         if session is None:
             raise HTTPException(status_code=404, detail="import not found")
-        report = capability_report(session.scene, session.diagnostics) if session.scene else None
-        return {
-            "schema_version": 1,
-            "import_id": import_id,
-            "candidates": {
-                role: _candidate_summary(candidate, session.scene)
-                for role, candidate in session.candidates.items()
-            },
-            "manifest": (
-                _candidate_summary(session.manifest_candidate, session.scene)
-                if session.manifest_candidate
-                else None
-            ),
-            "scene": _scene_summary(session.scene, session.diagnostics) if session.scene else None,
-            "diagnostics": _diagnostics(session.diagnostics),
-            "capabilities": report.model_dump() if report else {},
-        }
+        return _import_payload(session)
 
     @app.put("/api/v1/imports/{import_id}/metadata", dependencies=[Depends(require_session)])
     async def update_metadata(import_id: str, payload: MetadataUpdate) -> JSONResponse:
@@ -1005,9 +1127,10 @@ def create_app(
                 status_code=422,
                 content={"diagnostics": _diagnostics(session.diagnostics)},
             )
-        session.diagnostics = list(
-            session.manifest_candidate.diagnostics if session.manifest_candidate else []
-        )
+        session.diagnostics = [
+            *(session.source_scene.diagnostics if session.source_scene else []),
+            *(session.manifest_candidate.diagnostics if session.manifest_candidate else []),
+        ]
         session.diagnostics.extend(
             item for candidate in session.candidates.values() for item in candidate.diagnostics
         )

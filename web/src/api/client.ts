@@ -11,7 +11,10 @@ import type {
 export class ApiError extends Error {
   diagnostics: import("./types").Diagnostic[];
 
-  constructor(message: string, diagnostics: import("./types").Diagnostic[] = []) {
+  constructor(
+    message: string,
+    diagnostics: import("./types").Diagnostic[] = [],
+  ) {
     super(message);
     this.name = "ApiError";
     this.diagnostics = diagnostics;
@@ -43,7 +46,11 @@ export function probeImport(files: {
   body.append("rgb", files.rgb);
   body.append("depth", files.depth);
   if (files.manifest) body.append("manifest", files.manifest);
-  return request<ProbeResponse>("/api/v1/imports", { method: "POST", body, signal: files.signal });
+  return request<ProbeResponse>("/api/v1/imports", {
+    method: "POST",
+    body,
+    signal: files.signal,
+  });
 }
 
 export function confirmImport(
@@ -51,38 +58,82 @@ export function confirmImport(
   metadata: MetadataPayload,
   signal?: AbortSignal,
 ): Promise<ConfirmedImport> {
-  return request<ConfirmedImport>(`/api/v1/imports/${encodeURIComponent(importId)}/metadata`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(metadata),
-    signal,
-  });
+  return request<ConfirmedImport>(
+    `/api/v1/imports/${encodeURIComponent(importId)}/metadata`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(metadata),
+      signal,
+    },
+  );
 }
 
-export function getImport(importId: string, signal?: AbortSignal): Promise<ConfirmedImport> {
-  return request<ConfirmedImport>(`/api/v1/imports/${encodeURIComponent(importId)}`, { signal });
+export function getImport(
+  importId: string,
+  signal?: AbortSignal,
+): Promise<ConfirmedImport> {
+  return request<ConfirmedImport>(
+    `/api/v1/imports/${encodeURIComponent(importId)}`,
+    { signal },
+  );
 }
 
-export function commitImport(importId: string, signal?: AbortSignal): Promise<{ schema_version: 1; scene: SceneSummary }> {
-  return request<{ schema_version: 1; scene: SceneSummary }>(`/api/v1/imports/${encodeURIComponent(importId)}/commit`, {
-    method: "POST",
-    signal,
-  });
+export function reopenSceneImport(
+  sceneId: string,
+  signal?: AbortSignal,
+): Promise<ProbeResponse> {
+  return request<ProbeResponse>(
+    `/api/v1/scenes/${encodeURIComponent(sceneId)}/imports`,
+    {
+      method: "POST",
+      signal,
+    },
+  );
 }
 
-export function listScenes(signal?: AbortSignal): Promise<{ schema_version: 1; scenes: SceneSummary[] }> {
-  return request<{ schema_version: 1; scenes: SceneSummary[] }>("/api/v1/scenes", { signal });
+export function commitImport(
+  importId: string,
+  signal?: AbortSignal,
+): Promise<{ schema_version: 1; scene: SceneSummary }> {
+  return request<{ schema_version: 1; scene: SceneSummary }>(
+    `/api/v1/imports/${encodeURIComponent(importId)}/commit`,
+    {
+      method: "POST",
+      signal,
+    },
+  );
 }
 
-export function getScene(sceneId: string, signal?: AbortSignal): Promise<{ schema_version: 1; scene: SceneSummary }> {
-  return request<{ schema_version: 1; scene: SceneSummary }>(`/api/v1/scenes/${encodeURIComponent(sceneId)}`, { signal });
+export function listScenes(
+  signal?: AbortSignal,
+): Promise<{ schema_version: 1; scenes: SceneSummary[] }> {
+  return request<{ schema_version: 1; scenes: SceneSummary[] }>(
+    "/api/v1/scenes",
+    { signal },
+  );
 }
 
-export function getCapabilities(signal?: AbortSignal): Promise<CapabilitiesResponse> {
+export function getScene(
+  sceneId: string,
+  signal?: AbortSignal,
+): Promise<{ schema_version: 1; scene: SceneSummary }> {
+  return request<{ schema_version: 1; scene: SceneSummary }>(
+    `/api/v1/scenes/${encodeURIComponent(sceneId)}`,
+    { signal },
+  );
+}
+
+export function getCapabilities(
+  signal?: AbortSignal,
+): Promise<CapabilitiesResponse> {
   return request<CapabilitiesResponse>("/api/v1/capabilities", { signal });
 }
 
-export function scenePreviewUrl(sceneId: string, role: "rgb" | "depth"): string {
+export function scenePreviewUrl(
+  sceneId: string,
+  role: "rgb" | "depth",
+): string {
   return `/api/v1/scenes/${encodeURIComponent(sceneId)}/preview/${role}`;
 }
 
@@ -116,6 +167,9 @@ export function derivationPointcloudUrl(derivationId: string): string {
   return `/api/v1/derivations/${encodeURIComponent(derivationId)}/pointcloud`;
 }
 
-export function derivationExportUrl(derivationId: string, format: "ply" | "json"): string {
+export function derivationExportUrl(
+  derivationId: string,
+  format: "ply" | "json",
+): string {
   return `/api/v1/derivations/${encodeURIComponent(derivationId)}/export/${format}`;
 }

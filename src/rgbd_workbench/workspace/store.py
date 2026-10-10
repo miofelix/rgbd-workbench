@@ -190,12 +190,15 @@ class WorkspaceStore:
                 if not locator.is_file():
                     raise FileNotFoundError(f"linked {role} source is missing")
                 current_stat = locator.stat()
+                registered_stat = linked[2]
                 if (
                     current_stat.st_size != source.size_bytes
+                    or current_stat.st_dev != registered_stat.st_dev
+                    or current_stat.st_ino != registered_stat.st_ino
+                    or current_stat.st_mtime_ns != registered_stat.st_mtime_ns
                     or self._hash_file(locator) != source.sha256
                 ):
                     raise ValueError(f"linked {role} source changed before commit")
-                registered_stat = linked[2]
                 linked_locators[role] = {
                     "path": str(locator),
                     "device": registered_stat.st_dev,
@@ -319,6 +322,69 @@ class WorkspaceStore:
             raise SceneSourceError("SCENE_SOURCE_STALE", "source changed while being snapshotted")
         self.resolve_scene_source(scene_id, role)
         return destination
+
+    def clone_scene_sources(
+        self, scene_id: str, max_bytes: int
+    ) -> tuple[dict[str, StagedFile], dict[str, SourceRef]]:
+        """Prepare independent import sources using only an existing Scene's locators."""
+        manifest = self.get_scene(scene_id)
+        staged: dict[str, StagedFile] = {}
+        sources: dict[str, SourceRef] = {}
+        roles: tuple[Literal["rgb", "depth"], ...] = ("rgb", "depth")
+        try:
+            for role in roles:
+                source = manifest.rgb if role == "rgb" else manifest.depth
+                source_path = self.resolve_scene_source(scene_id, role)
+                if source_path == self.scene_source_path(scene_id, role):
+                    if source.size_bytes > max_bytes:
+                        raise ValueError("source exceeds configured byte limit")
+                    source_id = secrets.token_hex(16)
+                    safe_name = self._safe_filename(source.filename)
+                    target = self.paths.resolve_write_path(
+                        Path(".staging") / f"{source_id}-{safe_name}"
+                    )
+                    staged[role] = StagedFile(
+                        source_id=source_id,
+                        filename=source.filename,
+                        safe_name=safe_name,
+                        path=target,
+                        sha256=source.sha256,
+                        size_bytes=source.size_bytes,
+                    )
+                    sources[role] = source.model_copy(update={"source_id": source_id})
+                    with tempfile.TemporaryDirectory(
+                        prefix=".scene-import-", dir=self.paths.staging
+                    ) as snapshot_name:
+                        snapshot = self.snapshot_scene_source(scene_id, role, Path(snapshot_name))
+                        os.replace(snapshot, target)
+                    self._fsync_directory(target.parent)
+                else:
+                    linked = self.register_linked(source_path, role)
+                    sources[role] = linked.model_copy(
+                        update={
+                            "filename": source.filename,
+                            "width": source.width,
+                            "height": source.height,
+                            "dtype": source.dtype,
+                        }
+                    )
+                    if linked.sha256 != source.sha256 or linked.size_bytes != source.size_bytes:
+                        raise SceneSourceError("LINKED_SOURCE_STALE", "linked source changed")
+            for role in roles:
+                self.resolve_scene_source(scene_id, role)
+            return staged, sources
+        except Exception:
+            self.discard_import_sources(staged, sources)
+            raise
+
+    def discard_import_sources(
+        self, staged: Mapping[str, StagedFile], sources: Mapping[str, SourceRef]
+    ) -> None:
+        """Release newly prepared sources after import creation fails."""
+        for item in staged.values():
+            item.path.unlink(missing_ok=True)
+        for source in sources.values():
+            self._linked_sources.pop(source.source_id, None)
 
     def derivation_dir(self, scene_id: str, derivation_key: str) -> Path:
         if not _SAFE_SCENE_ID.fullmatch(scene_id):

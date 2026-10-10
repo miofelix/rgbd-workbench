@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { forwardRef, useImperativeHandle } from "react";
+import { forwardRef, useEffect, useImperativeHandle } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -28,14 +28,19 @@ vi.mock("../../web/src/features/pointcloud/PointCloudViewer", () => ({
       selectedPoints = [],
       viewSpec,
       onViewSpecChange,
+      onReadyChange,
     }: {
       onPointSelected: (point: SelectedPoint) => void;
       selectedPoints: SelectedPoint[];
       viewSpec: { projection: string; colorMode: string; pointSize: number };
       onViewSpecChange: (patch: object) => void;
+      onReadyChange?: (ready: boolean) => void;
     },
     ref,
   ) {
+    useEffect(() => {
+      onReadyChange?.(true);
+    }, [onReadyChange]);
     useImperativeHandle(ref, () => ({
       capturePng: () => "data:image/png;base64,fixture",
       resetView: vi.fn(),
