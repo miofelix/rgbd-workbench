@@ -1,4 +1,4 @@
-import { Crosshair, ScanLine } from "lucide-react";
+import { ScanLine } from "lucide-react";
 import { useRef } from "react";
 
 import { scenePreviewUrl } from "../../api/client";
@@ -11,10 +11,10 @@ import {
   type PointCloudViewerHandle,
 } from "../pointcloud/PointCloudViewer";
 import { ProcessingPanel } from "../pointcloud/ProcessingPanel";
+import { TrajectoryPanel } from "../trajectory/TrajectoryPanel";
 import { DepthPreview } from "./DepthPreview";
 import { LinkedImagePreview } from "./LinkedImagePreview";
 import { StatisticsPanel } from "./StatisticsPanel";
-import { TrajectoryPanel } from "../trajectory/TrajectoryPanel";
 
 interface SceneInspectorProps {
   scene: SceneSummary | null;
@@ -35,19 +35,14 @@ export function SceneInspector({
     viewSpec,
     setViewSpec,
   } = useWorkbenchStore();
-
-  if (!scene) {
+  if (!scene)
     return (
       <section className="empty-workspace">
-        <div className="empty-icon">
-          <ScanLine size={28} />
-        </div>
-        <span className="eyebrow">READY WHEN YOU ARE</span>
+        <ScanLine size={28} />
         <h2>从一组 RGB-D 开始</h2>
-        <p>导入后，先检查二维数据与深度语义，再逐步解锁点云和轨迹能力。</p>
+        <p>选择上方“导入”，添加 RGB 图像与深度文件。</p>
       </section>
     );
-  }
 
   const metric = scene.capabilities?.metric_pointcloud ?? false;
   const relative = scene.capabilities?.relative_pointcloud ?? false;
@@ -72,37 +67,76 @@ export function SceneInspector({
     const selected = viewerRef.current?.selectPixel(pixelIndex);
     if (selected) selectPoint(selected);
   };
+  const processing = (
+    <ProcessingPanel
+      enabled={geometryReady}
+      sourceWidth={sourceWidth}
+      sourceHeight={sourceHeight}
+    />
+  );
+  const exports = currentUrls ? (
+    <ExportActions
+      urls={currentUrls}
+      viewerRef={viewerRef}
+      displayName={scene.display_name}
+    />
+  ) : null;
+  const derivationPrompt = (
+    <section className="derivation-empty">
+      <ScanLine size={22} />
+      <div>
+        <strong>
+          {geometryReady ? "生成点云后开始分析" : "当前可检查二维图像"}
+        </strong>
+        <p>
+          {geometryReady
+            ? "点击“应用处理”生成点云，即可选点测量与导出。"
+            : "补全数据检查中的几何信息后，可使用三维分析。"}
+        </p>
+      </div>
+    </section>
+  );
 
   return (
     <div className="scene-inspector">
       <div className="scene-toolbar">
         <div>
-          <span className="eyebrow">SCENE INSPECTOR</span>
+          <span className="eyebrow">当前场景</span>
           <h2>{scene.display_name}</h2>
         </div>
         <span
           className={`capability-pill ${geometryReady ? "ready" : "pending"}`}
         >
-          {metric ? "米制几何可用" : relative ? "相对几何可用" : "待补全"}
+          {metric ? "米制几何可用" : relative ? "相对几何可用" : "二维查看"}
         </span>
       </div>
-
+      <SceneDetails
+        key={scene.scene_id}
+        scene={scene}
+        geometryReady={geometryReady}
+      />
       {mode === "inspect" && (
         <>
-          <SourcePreviews scene={scene} />
-          <ProcessingPanel
-            enabled={geometryReady}
-            sourceWidth={sourceWidth}
-            sourceHeight={sourceHeight}
-          />
-          {currentDerivation && currentUrls ? (
+          <details
+            className="source-section panel"
+            key={`${scene.scene_id}-${Boolean(currentDerivation)}`}
+            open={!currentDerivation}
+          >
+            <summary>
+              输入图像{" "}
+              <span>
+                {scene.rgb.width} × {scene.rgb.height} ·{" "}
+                {scene.depth_spec?.unit ?? "未确认单位"}
+              </span>
+            </summary>
+            <SourcePreviews scene={scene} />
+          </details>
+          {processing}
+          {viewer && currentDerivation ? (
             <div className="analysis-workspace">
               <section className="panel viewer-panel">
                 <div className="panel-heading">
-                  <div>
-                    <span className="eyebrow">APPLIED DERIVATION</span>
-                    <h3>三维点云</h3>
-                  </div>
+                  <h3>三维点云</h3>
                   <span className="viewer-meta">
                     {currentDerivation.point_count.toLocaleString()} 点 ·{" "}
                     {currentDerivation.unit}
@@ -115,176 +149,206 @@ export function SceneInspector({
                   points={selectedPoints}
                   onClear={clearSelectedPoints}
                 />
-                <ExportActions
-                  urls={currentUrls}
-                  viewerRef={viewerRef}
-                  displayName={scene.display_name}
-                />
+                {exports}
               </div>
             </div>
           ) : (
-            <section className="derivation-empty">
-              <ScanLine size={22} />
-              <div>
-                <strong>尚未应用点云处理</strong>
-                <p>
-                  确认参数后应用，三维查看、测量和静态导出会使用同一派生结果。
-                </p>
-              </div>
-            </section>
+            derivationPrompt
           )}
-          <div className="inspection-grid">
-            <section className="panel compact-panel">
-              <div className="panel-heading">
-                <h3>查看状态</h3>
-                <Crosshair size={17} />
-              </div>
-              <div className="status-rows">
-                <div>
-                  <span>坐标基准</span>
-                  <strong>{scene.frame_id} frame</strong>
-                </div>
-                <div>
-                  <span>深度表示</span>
-                  <strong>
-                    {scene.depth_spec?.representation ?? "未确认"}
-                  </strong>
-                </div>
-                <div>
-                  <span>对齐</span>
-                  <strong>{scene.alignment?.state ?? "未确认"}</strong>
-                </div>
-                <div>
-                  <span>源文件</span>
-                  <strong>只读</strong>
-                </div>
-              </div>
-            </section>
-            <section className="panel compact-panel statistics-panel-inline">
-              <div className="panel-heading">
-                <h3>深度摘要</h3>
-                <span className="muted">当前输入</span>
-              </div>
-              <StatisticsPanel scene={scene} />
-            </section>
-          </div>
         </>
       )}
-
       {mode === "compare" && (
         <>
-          <ProcessingPanel
-            enabled={geometryReady}
-            sourceWidth={sourceWidth}
-            sourceHeight={sourceHeight}
-          />
-          {currentDerivation && currentUrls ? (
+          {processing}
+          <div className="compare-grid">
+            <section className="panel compare-tile">
+              <div className="panel-heading">
+                <h3>RGB 输入</h3>
+                <span className="muted">
+                  {scene.rgb.width} × {scene.rgb.height}
+                </span>
+              </div>
+              <div className="compare-media">
+                {viewer ? (
+                  <LinkedImagePreview
+                    src={scenePreviewUrl(scene.scene_id, "rgb")}
+                    alt="RGB 输入"
+                    sourceWidth={scene.rgb.width ?? sourceWidth}
+                    sourceHeight={scene.rgb.height ?? sourceHeight}
+                    selectedPoints={selectedPoints}
+                    onPixelSelected={selectImagePixel}
+                  />
+                ) : (
+                  <img
+                    src={scenePreviewUrl(scene.scene_id, "rgb")}
+                    alt="RGB 输入"
+                  />
+                )}
+              </div>
+            </section>
+            <section className="panel compare-tile">
+              <div className="panel-heading">
+                <h3>深度输入</h3>
+                <span className="muted">
+                  {scene.depth_spec?.unit ?? "未确认单位"}
+                </span>
+              </div>
+              <div className="compare-media">
+                {viewer ? (
+                  <LinkedImagePreview
+                    src={scenePreviewUrl(scene.scene_id, "depth")}
+                    alt="深度输入"
+                    sourceWidth={sourceWidth}
+                    sourceHeight={sourceHeight}
+                    selectedPoints={selectedPoints}
+                    onPixelSelected={selectImagePixel}
+                  />
+                ) : (
+                  <img
+                    src={scenePreviewUrl(scene.scene_id, "depth")}
+                    alt="深度输入"
+                  />
+                )}
+              </div>
+            </section>
+            <section className="panel compare-tile compare-viewer-tile">
+              <div className="panel-heading">
+                <h3>点云视图</h3>
+                <span className="muted">
+                  {currentDerivation
+                    ? `${currentDerivation.point_count.toLocaleString()} 点`
+                    : "待生成"}
+                </span>
+              </div>
+              {viewer ?? derivationPrompt}
+            </section>
+            <section className="panel compare-tile compare-summary-tile">
+              <div className="panel-heading">
+                <h3>深度摘要</h3>
+              </div>
+              <StatisticsPanel scene={scene} />
+              {viewer && (
+                <MeasurementPanel
+                  points={selectedPoints}
+                  onClear={clearSelectedPoints}
+                  embedded
+                />
+              )}
+            </section>
+          </div>
+          {exports}
+        </>
+      )}
+      {mode === "trajectory" && (
+        <>
+          {viewer && currentDerivation ? (
             <>
-              <div className="compare-grid">
-                <section className="panel compare-tile">
+              <div className="trajectory-workspace">
+                <section className="panel viewer-panel">
                   <div className="panel-heading">
-                    <h3>RGB 输入</h3>
-                    <span className="muted">
-                      {scene.rgb.width} × {scene.rgb.height}
-                    </span>
-                  </div>
-                  <div className="compare-media">
-                    <LinkedImagePreview
-                      src={scenePreviewUrl(scene.scene_id, "rgb")}
-                      alt="RGB 输入"
-                      sourceWidth={scene.rgb.width ?? sourceWidth}
-                      sourceHeight={scene.rgb.height ?? sourceHeight}
-                      selectedPoints={selectedPoints}
-                      onPixelSelected={selectImagePixel}
-                    />
-                  </div>
-                </section>
-                <section className="panel compare-tile">
-                  <div className="panel-heading">
-                    <h3>深度输入</h3>
-                    <span className="muted">{scene.depth_spec?.unit}</span>
-                  </div>
-                  <div className="compare-media">
-                    <LinkedImagePreview
-                      src={scenePreviewUrl(scene.scene_id, "depth")}
-                      alt="深度输入"
-                      sourceWidth={sourceWidth}
-                      sourceHeight={sourceHeight}
-                      selectedPoints={selectedPoints}
-                      onPixelSelected={selectImagePixel}
-                    />
-                  </div>
-                </section>
-                <section className="panel compare-tile compare-viewer-tile">
-                  <div className="panel-heading">
-                    <h3>点云视图</h3>
-                    <span className="muted">
-                      {currentDerivation.point_count.toLocaleString()} 点
+                    <h3>轨迹点云</h3>
+                    <span className="viewer-meta">
+                      {currentDerivation.point_count.toLocaleString()} 点 ·{" "}
+                      {currentDerivation.unit}
                     </span>
                   </div>
                   {viewer}
                 </section>
-                <section className="panel compare-tile compare-summary-tile">
-                  <div className="panel-heading">
-                    <h3>深度摘要</h3>
-                    <span className="muted">联动状态</span>
-                  </div>
-                  <StatisticsPanel scene={scene} />
-                  <MeasurementPanel
-                    points={selectedPoints}
-                    onClear={clearSelectedPoints}
-                    embedded
-                  />
-                </section>
+                <TrajectoryPanel
+                  derivation={currentDerivation}
+                  viewerRef={viewerRef}
+                />
               </div>
-              <ExportActions
-                urls={currentUrls}
-                viewerRef={viewerRef}
-                displayName={scene.display_name}
-              />
+              {exports}
             </>
           ) : (
-            <section className="mode-placeholder panel">
-              <span className="eyebrow">DERIVATION REQUIRED</span>
-              <h3>四视图对照</h3>
-              <p>
-                先应用点云处理，RGB、深度、三维和统计将共享同一派生与选点状态。
-              </p>
-            </section>
+            <>
+              {processing}
+              <section className="mode-placeholder panel">
+                <h3>轨迹预览</h3>
+                <p>先应用点云处理，再选择轨迹预设预览相机视角。</p>
+              </section>
+            </>
           )}
         </>
       )}
-
-      {mode === "trajectory" &&
-        (currentDerivation && currentUrls ? (
-          <div className="trajectory-workspace">
-            <section className="panel viewer-panel">
-              <div className="panel-heading">
-                <div>
-                  <span className="eyebrow">APPLIED DERIVATION</span>
-                  <h3>轨迹点云</h3>
-                </div>
-                <span className="viewer-meta">
-                  {currentDerivation.point_count.toLocaleString()} 点 ·{" "}
-                  {currentDerivation.unit}
-                </span>
-              </div>
-              {viewer}
-            </section>
-            <TrajectoryPanel
-              derivation={currentDerivation}
-              viewerRef={viewerRef}
-            />
-          </div>
-        ) : (
-          <section className="mode-placeholder panel">
-            <span className="eyebrow">DERIVATION REQUIRED</span>
-            <h3>轨迹与视频导出</h3>
-            <p>先应用点云处理，再使用当前 applied derivation 预览相机轨迹。</p>
-            <span className="coming-pill">视频编码尚未启用</span>
-          </section>
-        ))}
     </div>
+  );
+}
+
+function SceneDetails({
+  scene,
+  geometryReady,
+}: {
+  scene: SceneSummary;
+  geometryReady: boolean;
+}): React.JSX.Element {
+  const rows: Array<[string, string, boolean]> = [
+    [
+      "RGB / 深度尺寸",
+      `${scene.rgb.width ?? "—"} × ${scene.rgb.height ?? "—"} / ${scene.depth.width ?? "—"} × ${scene.depth.height ?? "—"}`,
+      scene.rgb.width === scene.depth.width &&
+        scene.rgb.height === scene.depth.height,
+    ],
+    [
+      "深度表示",
+      scene.depth_spec?.representation ?? "未确认",
+      Boolean(scene.depth_spec),
+    ],
+    [
+      "深度单位",
+      scene.depth_spec?.unit ??
+        (scene.depth_spec?.scale_to_meter
+          ? `比例 ${scene.depth_spec.scale_to_meter} m`
+          : "未确认"),
+      Boolean(scene.depth_spec?.unit || scene.depth_spec?.scale_to_meter),
+    ],
+    ["相机内参", scene.camera ? "已提供" : "未提供", Boolean(scene.camera)],
+    [
+      "图像对齐",
+      scene.alignment?.state === "registered_to_rgb"
+        ? "已对齐到 RGB"
+        : "未确认或未对齐",
+      scene.alignment?.state === "registered_to_rgb",
+    ],
+    [
+      "畸变",
+      scene.camera?.distortion_model === "none" ? "已校正" : "未确认",
+      scene.camera?.distortion_model === "none",
+    ],
+  ];
+  return (
+    <details className="scene-details panel" open={!geometryReady}>
+      <summary>
+        数据检查{" "}
+        <span>{geometryReady ? "几何信息已确认" : "请检查几何信息"}</span>
+      </summary>
+      <div className="scene-details-grid">
+        <div className="contract-list">
+          {rows.map(([label, value, ok]) => (
+            <div className="contract-row" key={label}>
+              <span>{label}</span>
+              <strong className={ok ? "ok" : "pending"}>
+                {ok ? "✓" : "—"} {value}
+              </strong>
+            </div>
+          ))}
+        </div>
+        <div>
+          <StatisticsPanel scene={scene} />
+        </div>
+      </div>
+      {scene.diagnostics?.length ? (
+        <div className="diagnostic-list" aria-label="场景诊断">
+          {scene.diagnostics.map((item) => (
+            <div className={`diagnostic ${item.severity}`} key={item.code}>
+              <strong>{item.message}</strong>
+              {item.hint && <span>{item.hint}</span>}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </details>
   );
 }
 
@@ -299,7 +363,7 @@ function SourcePreviews({ scene }: { scene: SceneSummary }): React.JSX.Element {
       </div>
       <DepthPreview
         src={scenePreviewUrl(scene.scene_id, "depth")}
-        label={`DEPTH · ${scene.depth_spec?.unit ?? "未确认"}`}
+        label={`深度 · ${scene.depth_spec?.unit ?? "未确认单位"}`}
       />
     </div>
   );

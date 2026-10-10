@@ -49,6 +49,7 @@ async function importScene(
 ): Promise<void> {
   await page.goto("/?token=e2e-token");
   await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "导入", exact: true }).click();
   await page.setInputFiles('input[aria-label="可选 manifest 文件"]', {
     name: "scene.json",
     mimeType: "application/json",
@@ -156,7 +157,7 @@ test("previews a camera trajectory from the applied derivation", async ({
   await page.getByRole("button", { name: "应用处理" }).click();
   await expect(page.getByText("点云视图", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: /轨迹与导出/ }).click();
+  await page.getByRole("button", { name: /轨迹预览/ }).click();
   await expect(page.getByRole("heading", { name: "轨迹预览" })).toBeVisible();
   await expect(page.getByLabel("轨迹预设")).toHaveValue("orbit");
   await page.getByLabel("轨迹预设").selectOption("spiral");

@@ -18,6 +18,8 @@ interface WorkbenchState {
   activeSceneId: string | null;
   activeMode: ActiveMode;
   scenes: SceneSummary[];
+  scenesLoading: boolean;
+  scenesError: string | null;
   appliedScene: SceneSummary | null;
   importSession: ProbeResponse | null;
   draftMetadata: MetadataPayload;
@@ -82,6 +84,8 @@ const initialState = {
   activeSceneId: null,
   activeMode: "inspect" as ActiveMode,
   scenes: [] as SceneSummary[],
+  scenesLoading: false,
+  scenesError: null as string | null,
   appliedScene: null as SceneSummary | null,
   importSession: null as ProbeResponse | null,
   draftMetadata: {} as MetadataPayload,
@@ -114,13 +118,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   },
   setMode: (activeMode) => set({ activeMode }),
   selectScene: (scene) => {
+    if (scene && get().activeSceneId === scene.scene_id) return;
     activeDerivationRequest?.abort();
     activeDerivationRequest = null;
     set((state) => ({
       activeSceneId: scene?.scene_id ?? null,
       appliedScene: scene,
       diagnostics: [],
-      requestRevision: state.requestRevision + 1,
       derivationRequestRevision: state.derivationRequestRevision + 1,
       draftProcessing: freshProcessing(),
       appliedProcessing: null,
@@ -134,7 +138,6 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   setImportSession: (importSession) =>
     set({
       importSession,
-      diagnostics: importSession?.diagnostics ?? [],
       draftMetadata: {},
     }),
   setDraftMetadata: (draftMetadata) => set({ draftMetadata }),
@@ -210,7 +213,21 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
         typeof cause === "object" && cause !== null && "diagnostics" in cause
           ? ((cause as { diagnostics?: Diagnostic[] }).diagnostics ?? [])
           : [];
-      set({ diagnostics });
+      set({
+        diagnostics:
+          diagnostics.length > 0
+            ? diagnostics
+            : [
+                {
+                  code: "DERIVATION_REQUEST_FAILED",
+                  severity: "fatal",
+                  field: null,
+                  message: "点云处理失败，请检查本地服务并重新应用。",
+                  hint: cause instanceof Error ? cause.message : null,
+                  capability: null,
+                },
+              ],
+      });
     } finally {
       if (
         get().derivationRequestRevision === revision &&
@@ -224,13 +241,33 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   },
   loadScenes: async (loader: SceneLoader = listScenes) => {
     const revision = get().requestRevision + 1;
-    set({ requestRevision: revision });
-    const result = await loader();
-    if (get().requestRevision !== revision) return;
-    const scenes = Array.isArray(result) ? result : result.scenes;
-    set({ scenes });
-    if (scenes.length > 0 && get().activeSceneId === null) {
-      get().selectScene(scenes[0]);
+    set({ requestRevision: revision, scenesLoading: true, scenesError: null });
+    try {
+      const result = await loader();
+      if (get().requestRevision !== revision) return;
+      const scenes = Array.isArray(result) ? result : result.scenes;
+      set({ scenes });
+      const activeId = get().activeSceneId;
+      const activeScene = scenes.find((scene) => scene.scene_id === activeId);
+      if (activeScene) {
+        const previous = get().appliedScene;
+        if (JSON.stringify(previous) !== JSON.stringify(activeScene)) {
+          get().clearDerivation();
+          set({ appliedScene: activeScene });
+        }
+      } else if (activeId !== null) {
+        get().selectScene(scenes[0] ?? null);
+      } else if (scenes.length > 0) {
+        get().selectScene(scenes[0]);
+      }
+    } catch {
+      if (get().requestRevision !== revision) return;
+      set({
+        scenesError:
+          "无法读取场景。请使用启动命令提供的链接打开，并确认本地服务正在运行。",
+      });
+    } finally {
+      if (get().requestRevision === revision) set({ scenesLoading: false });
     }
   },
 }));

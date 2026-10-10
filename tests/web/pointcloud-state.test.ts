@@ -144,3 +144,51 @@ describe("point-cloud workbench state", () => {
     expect(useWorkbenchStore.getState().selectedPoints).toEqual([]);
   });
 });
+
+it("preserves applied processing and selection when selecting the current scene again", async () => {
+  useWorkbenchStore.getState().reset();
+  useWorkbenchStore.getState().selectScene(scene("kept"));
+  await useWorkbenchStore
+    .getState()
+    .applyProcessing(async () => derivationResponse("kept"));
+  useWorkbenchStore
+    .getState()
+    .selectPoint({ pixelIndex: 0, position: [0, 0, 1], unit: "m" });
+  useWorkbenchStore.getState().selectScene(scene("kept"));
+  expect(useWorkbenchStore.getState().appliedDerivation).not.toBeNull();
+  expect(useWorkbenchStore.getState().selectedPoints).toHaveLength(1);
+});
+
+it("shows request failures without replacing the applied derivation", async () => {
+  useWorkbenchStore.getState().reset();
+  useWorkbenchStore.getState().selectScene(scene("kept"));
+  await useWorkbenchStore
+    .getState()
+    .applyProcessing(async () => derivationResponse("kept"));
+  await useWorkbenchStore.getState().applyProcessing(async () => {
+    throw new Error("offline");
+  });
+  expect(useWorkbenchStore.getState().diagnostics[0].message).toContain(
+    "重新应用",
+  );
+  expect(useWorkbenchStore.getState().appliedDerivation?.scene_id).toBe("kept");
+  expect(useWorkbenchStore.getState().derivationBusy).toBe(false);
+});
+
+it("does not put import diagnostics into current processing diagnostics", () => {
+  useWorkbenchStore.getState().reset();
+  useWorkbenchStore.setState({
+    diagnostics: [
+      {
+        code: "PROCESSING",
+        severity: "warning",
+        message: "processing",
+        field: null,
+        hint: null,
+        capability: null,
+      },
+    ],
+  });
+  useWorkbenchStore.getState().setImportSession(null);
+  expect(useWorkbenchStore.getState().diagnostics[0].code).toBe("PROCESSING");
+});

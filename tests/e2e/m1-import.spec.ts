@@ -4,7 +4,7 @@ test("M1 shell opens with explicit disabled capabilities", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText("RGB-D Lab", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /四视图对照/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /轨迹与导出/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /轨迹预览/ })).toBeVisible();
   await page.screenshot({
     path: "test-results/m1-desktop.png",
     fullPage: true,
@@ -28,6 +28,7 @@ test("M1 imports a unitless RGB-D pair and commits a Scene", async ({
   page,
 }) => {
   await page.goto("/?token=e2e-token");
+  await page.getByRole("button", { name: "导入", exact: true }).click();
   const rgbPng = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGMU0bBhYGBgYgADAAWiAHylyrQdAAAAAElFTkSuQmCC",
     "base64",
@@ -61,5 +62,5 @@ test("M1 imports a unitless RGB-D pair and commits a Scene", async ({
     page.getByRole("heading", { name: "Untitled Scene", exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: /四视图对照/ }).click();
-  await expect(page.getByText("四视图对照", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "点云视图" })).toBeVisible();
 });
