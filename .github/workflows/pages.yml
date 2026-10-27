@@ -27,7 +27,10 @@ jobs:
       - run: npm run check
       - run: npm audit --audit-level=high
       - run: npx playwright install --with-deps chromium firefox webkit
-      - run: npm run test:e2e
+      - name: Check Firefox WebGL capability
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" npm run test:e2e -- --project=firefox -g "browser exposes WebGL2"
+      - name: Run browser acceptance under software display
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" npm run test:e2e
       - name: Upload browser test artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4

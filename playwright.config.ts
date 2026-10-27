@@ -18,7 +18,13 @@ export default defineConfig({
       name: "firefox",
       use: {
         ...devices["Desktop Firefox"],
-        ...{ firefoxUserPrefs: { "webgl.force-enabled": true } },
+        ...{
+          firefoxUserPrefs: {
+            "webgl.force-enabled": true,
+            "gfx.webrender.software": true,
+            "webgl.out-of-process": false,
+          },
+        },
       },
     },
     { name: "webkit", use: { ...devices["Desktop Safari"] } },
