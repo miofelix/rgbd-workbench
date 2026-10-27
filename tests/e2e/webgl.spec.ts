@@ -6,7 +6,11 @@ test("browser exposes WebGL2 for point-cloud preview", async ({ page }) => {
     const canvas = document.createElement("canvas");
     const gl = canvas.getContext("webgl2");
     return gl
-      ? { webgl2: true, renderer: gl.getParameter(gl.RENDERER), vendor: gl.getParameter(gl.VENDOR) }
+      ? {
+          webgl2: true,
+          renderer: gl.getParameter(gl.RENDERER) as string,
+          vendor: gl.getParameter(gl.VENDOR) as string,
+        }
       : { webgl2: false };
   });
   console.log("WEBGL_CAPABILITY", JSON.stringify(capabilities));
