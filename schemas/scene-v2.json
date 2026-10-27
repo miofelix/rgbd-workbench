@@ -1,0 +1,445 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "format": {
+      "type": "string",
+      "const": "rgbd-workbench/scene"
+    },
+    "schemaVersion": {
+      "type": "number",
+      "const": 2
+    },
+    "sceneId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "sceneHash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "sources": {
+      "type": "object",
+      "properties": {
+        "rgb": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "type": "string",
+              "const": "rgbd-workbench/source"
+            },
+            "schemaVersion": {
+              "type": "number",
+              "const": 2
+            },
+            "role": {
+              "type": "string",
+              "enum": ["rgb", "depth"]
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "mediaType": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "byteLength": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483648
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "width": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "height": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "dataType": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "encoding": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "format",
+            "schemaVersion",
+            "role",
+            "name",
+            "mediaType",
+            "byteLength",
+            "sha256",
+            "width",
+            "height",
+            "dataType",
+            "encoding"
+          ],
+          "additionalProperties": false
+        },
+        "depth": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "type": "string",
+              "const": "rgbd-workbench/source"
+            },
+            "schemaVersion": {
+              "type": "number",
+              "const": 2
+            },
+            "role": {
+              "type": "string",
+              "enum": ["rgb", "depth"]
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "mediaType": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "byteLength": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483648
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "width": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "height": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "dataType": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "encoding": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "format",
+            "schemaVersion",
+            "role",
+            "name",
+            "mediaType",
+            "byteLength",
+            "sha256",
+            "width",
+            "height",
+            "dataType",
+            "encoding"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": ["rgb", "depth"],
+      "additionalProperties": false
+    },
+    "geometry": {
+      "type": "object",
+      "properties": {
+        "depth": {
+          "type": "object",
+          "properties": {
+            "representation": {
+              "type": "string",
+              "enum": ["z_depth", "relative_z"]
+            },
+            "unit": {
+              "type": "string",
+              "enum": ["m", "mm", "unitless"]
+            },
+            "scaleToMeter": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "invalidValues": {
+              "maxItems": 64,
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            },
+            "validMin": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "validMax": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "representation",
+            "unit",
+            "scaleToMeter",
+            "invalidValues",
+            "validMin",
+            "validMax"
+          ],
+          "additionalProperties": false
+        },
+        "camera": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "const": "pinhole"
+                },
+                "width": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 32768
+                },
+                "height": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 32768
+                },
+                "fx": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "fy": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "cx": {
+                  "type": "number"
+                },
+                "cy": {
+                  "type": "number"
+                },
+                "distortionModel": {
+                  "type": "string",
+                  "const": "none"
+                }
+              },
+              "required": ["model", "width", "height", "fx", "fy", "cx", "cy", "distortionModel"],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alignment": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": ["registered_to_rgb", "unregistered", "unknown"]
+            },
+            "method": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": ["state", "method"],
+          "additionalProperties": false
+        },
+        "rawDescriptor": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "shape": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  ],
+                  "items": false,
+                  "minItems": 2,
+                  "maxItems": 2
+                },
+                "dataType": {
+                  "type": "string",
+                  "enum": [
+                    "uint8",
+                    "uint16",
+                    "uint32",
+                    "int8",
+                    "int16",
+                    "int32",
+                    "float16",
+                    "float32",
+                    "float64"
+                  ]
+                },
+                "endianness": {
+                  "type": "string",
+                  "enum": ["little", "big"]
+                }
+              },
+              "required": ["shape", "dataType", "endianness"],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["depth", "camera", "alignment", "rawDescriptor"],
+      "additionalProperties": false
+    },
+    "frameId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "coordinateConvention": {
+      "type": "string",
+      "const": "x_right_y_down_z_forward"
+    },
+    "normalizerVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "decoderContractVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    }
+  },
+  "required": [
+    "format",
+    "schemaVersion",
+    "sceneId",
+    "sceneHash",
+    "name",
+    "sources",
+    "geometry",
+    "frameId",
+    "coordinateConvention",
+    "normalizerVersion",
+    "decoderContractVersion"
+  ],
+  "additionalProperties": false
+}

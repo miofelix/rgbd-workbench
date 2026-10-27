@@ -1,3 +1,8 @@
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
 .venv/
 __pycache__/
 *.py[cod]
@@ -6,15 +11,11 @@ __pycache__/
 .mypy_cache/
 .coverage
 htmlcov/
-node_modules/
-dist/
-playwright-report/
-test-results/
 .superpowers/
 .DS_Store
 *.egg-info/
 *.tsbuildinfo
 .env
-/logs/
 /workspace/
 *.rgbdw
+*.rgbd.zip

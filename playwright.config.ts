@@ -1,24 +1,20 @@
 import { defineConfig, devices } from "@playwright/test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  // E2E cases share the local service token and workspace; parallel workers race on imports.
+  fullyParallel: false,
+  timeout: 60_000,
+  expect: { timeout: 15_000 },
   workers: 1,
-  use: {
-    baseURL: "http://127.0.0.1:8765",
-    trace: "retain-on-failure",
-  },
+  use: { baseURL: "http://127.0.0.1:4173", trace: "retain-on-failure" },
   webServer: {
-    command:
-      "PYTHONPATH=src RGBD_WORKBENCH_SESSION_TOKEN=e2e-token .venv/bin/python -m rgbd_workbench.cli.main serve --no-open --port 8765",
-    env: {
-      RGBD_WORKBENCH_WORKSPACE_ROOT: mkdtempSync(join(tmpdir(), "rgbd-e2e-")),
-    },
-    url: "http://127.0.0.1:8765/api/v1/health",
-    reuseExistingServer: false,
+    command: "npm run build && npm run preview -- --host 127.0.0.1 --port 4173",
+    url: "http://127.0.0.1:4173",
+    reuseExistingServer: !process.env.CI,
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    { name: "firefox", use: { ...devices["Desktop Firefox"] } },
+    { name: "webkit", use: { ...devices["Desktop Safari"] } },
+  ],
 });

@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "format": {
+      "type": "string",
+      "const": "rgbd-workbench/camera-path"
+    },
+    "schemaVersion": {
+      "type": "number",
+      "const": 2
+    },
+    "samplerVersion": {
+      "type": "string",
+      "const": "2.0.0"
+    },
+    "unit": {
+      "type": "string",
+      "enum": ["m", "unitless"]
+    },
+    "frameId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "targetSource": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["scene_median", "roi_median", "selected_point", "manual"]
+        },
+        "pixelIndex": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["kind", "pixelIndex"],
+      "additionalProperties": false
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "orbit",
+        "ellipse",
+        "dolly",
+        "truck",
+        "pedestal",
+        "tilt_pan",
+        "spiral",
+        "flythrough",
+        "dolly_zoom",
+        "custom"
+      ]
+    },
+    "duration": {
+      "type": "number",
+      "minimum": 0.1,
+      "maximum": 120
+    },
+    "loopMode": {
+      "type": "string",
+      "enum": ["once", "loop"]
+    },
+    "target": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        }
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "radius": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "turns": {
+      "type": "number",
+      "minimum": 0.01,
+      "maximum": 100
+    },
+    "elevation": {
+      "type": "number",
+      "minimum": -89,
+      "maximum": 89
+    },
+    "distanceScale": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "easing": {
+      "type": "string",
+      "enum": ["linear", "smoothstep", "ease_in_out_cubic"]
+    },
+    "projection": {
+      "type": "object",
+      "properties": {
+        "projection": {
+          "type": "string",
+          "enum": ["perspective", "orthographic"]
+        },
+        "fov": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 179
+        },
+        "orthoScale": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "required": ["projection", "fov", "orthoScale"],
+      "additionalProperties": false
+    },
+    "keyframes": {
+      "maxItems": 256,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "position": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "items": false,
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "target": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "items": false,
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "up": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "items": false,
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "projection": {
+            "type": "string",
+            "enum": ["perspective", "orthographic"]
+          },
+          "fov": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 179
+          },
+          "orthoScale": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "time": {
+            "type": "number",
+            "minimum": 0
+          },
+          "easing": {
+            "type": "string",
+            "enum": ["linear", "smoothstep", "ease_in_out_cubic"]
+          }
+        },
+        "required": [
+          "position",
+          "target",
+          "up",
+          "projection",
+          "fov",
+          "orthoScale",
+          "time",
+          "easing"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "format",
+    "schemaVersion",
+    "samplerVersion",
+    "unit",
+    "frameId",
+    "targetSource",
+    "kind",
+    "duration",
+    "loopMode",
+    "target",
+    "radius",
+    "turns",
+    "elevation",
+    "distanceScale",
+    "easing",
+    "projection",
+    "keyframes"
+  ],
+  "additionalProperties": false
+}

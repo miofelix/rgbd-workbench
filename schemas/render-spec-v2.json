@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "format": {
+      "type": "string",
+      "const": "rgbd-workbench/render-spec"
+    },
+    "schemaVersion": {
+      "type": "number",
+      "const": 2
+    },
+    "layout": {
+      "type": "string",
+      "enum": ["pointcloud", "rgb_depth_pointcloud"]
+    },
+    "width": {
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 4096
+    },
+    "height": {
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 4096
+    },
+    "fps": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 60
+    },
+    "codec": {
+      "type": "string",
+      "enum": ["avc", "vp9", "png"]
+    },
+    "quality": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    },
+    "background": {
+      "type": "string",
+      "enum": ["dark", "light"]
+    },
+    "pointSize": {
+      "type": "number",
+      "minimum": 0.5,
+      "maximum": 12
+    },
+    "antiAlias": {
+      "anyOf": [
+        {
+          "type": "number",
+          "const": 1
+        },
+        {
+          "type": "number",
+          "const": 2
+        }
+      ]
+    },
+    "colorMode": {
+      "type": "string",
+      "enum": ["rgb", "depth", "mono", "validity"]
+    },
+    "colorMap": {
+      "type": "string",
+      "enum": ["turbo", "viridis", "inferno", "magma", "plasma", "cividis", "gray"]
+    },
+    "colorRange": {
+      "type": "object",
+      "properties": {
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        }
+      },
+      "required": ["min", "max"],
+      "additionalProperties": false
+    },
+    "maxPoints": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 2000000
+    },
+    "overlays": {
+      "type": "object",
+      "properties": {
+        "axes": {
+          "type": "boolean"
+        },
+        "grid": {
+          "type": "boolean"
+        },
+        "title": {
+          "type": "boolean"
+        },
+        "unit": {
+          "type": "boolean"
+        },
+        "time": {
+          "type": "boolean"
+        },
+        "provenance": {
+          "type": "boolean"
+        }
+      },
+      "required": ["axes", "grid", "title", "unit", "time", "provenance"],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "format",
+    "schemaVersion",
+    "layout",
+    "width",
+    "height",
+    "fps",
+    "codec",
+    "quality",
+    "background",
+    "pointSize",
+    "antiAlias",
+    "colorMode",
+    "colorMap",
+    "colorRange",
+    "maxPoints",
+    "overlays"
+  ],
+  "additionalProperties": false
+}

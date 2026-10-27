@@ -1,85 +1,44 @@
-# Development Notes
+# 开发与贡献
 
-## Boundaries
+## 环境
 
-The Python service owns source probing, explicit normalization metadata, workspace transactions,
-diagnostics, point-cloud processing and API responses. The browser owns interaction state, Three.js
-view state and previews; it never recomputes geometry for exports. M1/M2 do not import device, model,
-CUDA, robot or external-repository code.
+- Node.js 24+，npm lockfile 为依赖事实来源。
+- TypeScript strict + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`。
+- 无 Python、FastAPI、CLI、本地 HTTP API 或 Pyodide 运行时。
 
-The public domain contracts live in `src/rgbd_workbench/domain/`. JSON schemas in `schemas/` are generated
-from those Pydantic models:
+## 日常命令
 
-```bash
-.venv/bin/python scripts/check-generated-schemas.py --write
-.venv/bin/python scripts/check-generated-schemas.py
-```
+| 命令                                | 用途                                 |
+| ----------------------------------- | ------------------------------------ |
+| `npm run dev`                       | Vite 开发服务                        |
+| `npm run check`                     | 格式、lint、类型、Schema、测试、构建 |
+| `npm test` / `npm run test:watch`   | 单元与集成测试                       |
+| `npm run test:e2e`                  | 三浏览器端到端验收                   |
+| `npm run schemas`                   | 从 Zod 生成 JSON Schema              |
+| `npm run schemas:check`             | 阻止 Schema 漂移                     |
+| `npm run build` / `npm run preview` | 生产构建与预览                       |
 
-Do not hand-edit generated schema files.
+## 修改规则
 
-## Test matrix
+1. 先明确领域术语和不变量，再实现。`GLOSSARY.md` 是统一语言。
+2. 公共格式变更同时更新 `src/domain`、生成 Schema、`docs/architecture/data-formats.md`、fixtures 和版本/测试。
+3. 不在 UI、Worker、存储各自维护一份几何规则；不以 mock 替代真实浏览器验收。
+4. 大数组用 typed arrays/Transferable，避免 base64 和无意复制。Worker 不能读写 DOM。
+5. Source 完整性失败是硬门禁；派生缓存损坏可删除重建。缓存按 `sceneId + derivationKey` 隔离。
+6. IndexedDB 事务只放同步读写；hash、编码等异步工作在事务外完成。私有存储使用 ArrayBuffer + mediaType，避免 Safari File/Blob 差异。
+7. 视频导出冻结 Derivation/CameraPath/RenderSpec，使用 Worker；取消必须终止工作并阻止下载。
+8. 外部依赖优先官方/第一方实现，锁定版本、核对许可证。Mediabunny 为 MPL-2.0，修改其源文件时遵守对应文件级义务。
 
-```bash
-.venv/bin/python -m pytest -q
-.venv/bin/ruff check src tests scripts
-.venv/bin/ruff format --check src tests scripts
-.venv/bin/mypy src/rgbd_workbench
-npm test -- --run
-npm run typecheck
-npm run build
-npm run test:e2e -- tests/e2e/m1-import.spec.ts tests/e2e/m2-pointcloud.spec.ts
-```
+## 测试分层
 
-`tests/python/test_m1_integration.py` covers metric float32 NPY and unitless PFM flows. The browser
-test covers a PNG + PFM import, explicit `relative_z/unitless` confirmation, Scene commit and mobile
-layout. `tests/python/test_derivation_api.py` covers idempotent derivation, stale-source invalidation,
-binary/PLY/JSON downloads and unitless labeling. `tests/e2e/m2-pointcloud.spec.ts` covers metric and
-relative applied derivations, WebGL canvas loading, point measurement, static downloads and mobile
-overflow. The test web server uses a deterministic session token only inside the test process; normal
-CLI sessions use a random token.
+- Domain：Schema、JCS/hash、诊断、格式协议与资源限制。
+- Compute：解码、点云、KNN、轨迹、色图、CPU 投影、版式与导出。
+- Application：内存 Library/Processor，验证缓存、取消、快照和应用用例。
+- Persistence：fake-indexeddb 验证事务、Source/Archive 完整性、Scene 缓存归属。
+- E2E：真实浏览器 IndexedDB、Web Worker、WebGL、下载与刷新恢复。
 
-## Adding a format
+不要仅以 jsdom 结果声称 Safari/真实浏览器兼容。测试错误消息使用唯一 role/test id，不依赖页面重复文案。长任务必须有取消且无下载断言。
 
-Add a focused adapter under `src/rgbd_workbench/adapters/`, return a `ProbeCandidate`, and keep probing
-separate from semantic normalization. Add fixtures for malformed headers, oversized declarations,
-invalid dtype and missing units. Never infer units from numeric ranges or extension names.
+## 目录和风格
 
-## M2/M3 handoff
-
-M2 consumes `SceneManifestV1`, `ProcessingSpecV1` and the staged source contract without changing their
-meaning. `POST /api/v1/scenes/{scene_id}/derivations` is synchronous and cache-backed; its result is the
-only source for the browser viewer, measurements, PLY and JSON exports. M3 should consume an applied
-derivation and introduce the versioned CameraPath/RenderSpec contracts, CPU renderer, jobs/SSE and video
-encoders. Do not add trajectory or video behavior to the M1 import endpoint as an implicit side effect.
-
-The first M3 foundation is available as a pure Python boundary in `rgbd_workbench.trajectories`: strict
-`CameraPathV1`/`CameraKeyframeV1` and `RenderSpecV1` contracts are generated into
-`schemas/camera-path-v1.json` and `schemas/render-spec-v1.json`, while `sample_camera_path()` applies the
-same deterministic frame-count rules that a future browser preview and render job must use. A two-keyframe
-custom path is linear; longer paths use centripetal Catmull-Rom interpolation, and loop paths never repeat
-their endpoint. The Python and TypeScript implementations are checked against the shared
-`fixtures/m3/camera-path-vectors.json` vectors; the browser sampler lives in
-`web/src/trajectory/sampler.ts`. Neither module reads mutable UI state or publishes files.
-
-`rgbd_workbench.rendering.render_pointcloud_frame()` is the next M3 boundary. It consumes an applied
-point-cloud array, a sampled `CameraPose` and `RenderSpecV1`, then returns an RGB `uint8` frame using
-source-frame camera math, deterministic point-budget sampling and source-pixel z-buffer tie-breaking.
-`encode_png()` is intentionally a pure in-memory encoder; video jobs, frame publication and SSE remain
-out of scope until the renderer is integrated with the job lifecycle.
-
-## Design refinement acceptance
-
-See [design-refinement.md](design-refinement.md) for the three-stage scope. The expanded browser suite
-also verifies completing saved-scene metadata as a new scene, retrying a failed point-cloud download,
-keeping the applied derivation when returning from import, export access from trajectory mode, and
-all analysis modes at 320, 390, 768 and 1440px. Screenshots are written under `test-results/design-*`.
-
-Focused frontend tests cover processing validation/recovery, import cancellation and late responses,
-viewer readiness, drag-versus-click selection, PNG and clipboard feedback, and the trajectory frame
-budget. `tests/python/test_scene_metadata_imports.py` covers authenticated scene reopening, explicit
-semantics, Managed/Linked source validation, RAW metadata, independent commits and failure cleanup.
-
-Mypy uses the current environment's Python version so it can parse the installed NumPy/SciPy type
-stubs. The package still requires Python 3.11 or later and Ruff checks project syntax against 3.11.
-On minimal Linux installations install Chromium system dependencies with
-`npx playwright install --with-deps chromium` before running browser acceptance.
+React 组件使用 `PascalCase.tsx`，其他 TypeScript 使用 `kebab-case.ts`。公共 JSON 用 camelCase；诊断代码用稳定大写下划线。Prettier 和 ESLint 必须实际通过。历史 M1/M2 文档只作参考，不是当前实现依据。

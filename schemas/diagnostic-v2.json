@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "format": {
+      "type": "string",
+      "const": "rgbd-workbench/diagnostic"
+    },
+    "schemaVersion": {
+      "type": "number",
+      "const": 2
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["info", "warning", "fatal"]
+    },
+    "field": {
+      "default": null,
+      "type": ["string", "null"]
+    },
+    "capability": {
+      "default": null,
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "image_inspection",
+            "relative_pointcloud",
+            "metric_pointcloud",
+            "trajectory",
+            "video_export"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "messageKey": {
+      "type": "string",
+      "minLength": 1
+    },
+    "params": {
+      "default": {},
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema0"
+      }
+    }
+  },
+  "required": ["format", "schemaVersion", "code", "severity", "messageKey"],
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      ]
+    }
+  }
+}

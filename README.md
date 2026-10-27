@@ -1,137 +1,88 @@
-# RGB-D Lab
+# RGB-D Workbench
 
-`rgbd-workbench` is a local, analysis-first RGB-D workbench for inspecting one RGB/depth pair,
-confirming its geometry contract, and preparing later point-cloud and camera-path workflows. It is a
-standalone project: it does not require a camera SDK, CUDA, model weights, robot software, or another
-repository.
+一个**完全在浏览器中运行**的单帧 RGB-D 分析工作台。无需 Python、CLI、账户或应用后端；可部署到 GitHub Pages 等静态托管。原始文件只经用户显式选择进入浏览器，不上传到项目服务器。
 
-## What M1 and M2 provide
+## 功能
 
-- Local browser service bound to `127.0.0.1`.
-- Managed browser imports that copy source files into a workspace without modifying the originals.
-- CLI Linked imports for large files, with source identity revalidation.
-- PNG, JPEG, WebP and TIFF RGB probes.
-- Single-channel PNG/TIFF, NPY, NPZ, PFM and manifest-described RAW/BIN depth probes.
-- Explicit depth semantics for metric `z_depth` and `relative_z` unitless data.
-- RGB/depth dimensions, dtype, invalid values, unit and alignment diagnostics.
-- RGB and depth previews, depth summary, capability gates and a responsive analysis-first shell.
-- Deterministic server-side point-cloud derivations for metric `z_depth` and unitless `relative_z` Scenes.
-- A Three.js point-cloud viewer with stable preview LOD, orbit controls, perspective/orthographic projection,
-  RGB/depth/mono coloring, source-pixel selection and two-point distance measurement.
-- Draft/applied ProcessingSpec controls for ROI, stride, depth/XYZ clipping, voxel reduction, point budgets and
-  optional KNN filtering/smoothing. Processing changes are not sent to the server until the user applies them.
-- Atomic derivation caching keyed by Scene hash, processing parameters and processor version.
-- Binary point-cloud protocol downloads plus binary little-endian PLY and parameter JSON exports. Unitless
-  derivations remain explicitly `unitless` in measurements and exports; they are never relabeled as meters.
-- Versioned `CameraPathV1` and `RenderSpecV1` contracts with deterministic Python sampling for the M3
-  trajectory/rendering foundation. Video jobs and encoders are still gated until the renderer is complete.
-- A deterministic CPU point-cloud frame renderer with perspective/orthographic projection, stable z-buffer
-  tie-breaking, point budgets and PNG encoding for the future render job boundary.
+- RGB/深度导入、格式探测、显式几何合同与能力门禁。
+- RGB：PNG、JPEG、WebP、TIFF；深度：单通道 8/16-bit PNG、TIFF、NPY、NPZ、PFM、显式描述的 RAW/BIN。
+- 米制 `z_depth` 与无单位 `relative_z`，不猜测单位、相机或对齐关系。
+- 确定性点云：ROI、stride、深度/XYZ 裁剪、体素、点数预算、KNN 过滤与平滑。
+- Three.js 预览、稳定 LOD、投影/着色/色图、点选、两点测量、二维↔三维联动与统计。
+- PLY、参数 JSON、PNG 静态导出。
+- CameraPath 预设与关键帧编辑、target 来源、once/loop、easing、轨迹预览与校验。
+- 离线 CPU z-buffer 帧渲染、固定色标与七种 256 项 LUT、1x/2x 抗锯齿、纯三维及 RGB/深度/三维版式。
+- 浏览器支持时导出 MP4/H.264 或 WebM/VP9；不支持时可用 PNG 帧序列。视频与 sidecar 打包发布。
+- IndexedDB Scene/源/预览/派生存储、完整性校验、按 Scene 隔离缓存、刷新恢复、Source Archive 备份与恢复。
 
-Full trajectory editing, camera-path persistence, video rendering, SSE jobs and workspace packaging remain
-later M3 capabilities; the current preview is intentionally local to the applied derivation.
+**不包含**多帧融合、SLAM、深度估计、账号协作、云数据库、任意本地路径访问或旧 CLI/workspace 兼容层。相机轨迹不是三维扫描重建。
 
-## Working in the UI
+## 运行
 
-The workspace opens on your saved scene, or on import when it is empty. Use **Import** to add another
-RGB-D pair; saving returns to inspection. The scene selector stays available on phones.
-
-Start with the input images and expandable data checks. Apply the four common processing controls to
-create geometry; ROI, XYZ clipping, voxel reduction and KNN operations are under advanced processing.
-Metric processing ranges are expressed in normalized meters, including when source depth is in
-millimeters. Relative geometry keeps its `unitless` labels. Draft changes affect measurements and
-exports only after applying them, and can be restored to the last applied parameters or defaults.
-
-Use **Edit parameters** to reopen a saved scene as an independent draft. This lets an inspection-only
-scene gain explicitly supplied camera, alignment and depth metadata. Saving creates a new scene and
-keeps the previous scene available. Managed files are copied into the draft; Linked files keep their
-validated private references.
-
-Comparison remains available for two-dimensional inspection. Static PLY/JSON exports are available in
-all analysis modes; PNG capture and camera playback wait for the point-cloud viewer to load. Failed
-probes and point-cloud loads can be retried. Camera trajectory previews support up to 6,000 frames;
-shorten the duration or reduce the frame rate when a setting exceeds that browser preview budget.
-
-## Install
-
-Python 3.11+ and Node.js 24 LTS are supported on macOS and Linux.
+要求 Node.js 24+（见 `.nvmrc`）与支持 WebGL2 的现代浏览器。
 
 ```bash
-uv sync --extra dev
 npm ci
+npm run dev
 ```
 
-The equivalent Python setup is `python -m pip install -e '.[dev]'`.
-
-## Run
-
-Start the local service with a temporary or explicit workspace:
+打开终端显示的本地地址。生产构建与预览：
 
 ```bash
-rgbd-workbench serve --workspace-root ./workspace
+npm run build
+npm run preview
 ```
 
-The command prints a one-time URL containing a session token and opens the browser unless
-`--no-open` is supplied. The token is exchanged for an HttpOnly, SameSite cookie; business API routes
-do not accept unauthenticated requests.
+## 使用约定
 
-For a CLI-driven import:
+1. 选择 RGB、深度和可选 JSON/YAML manifest。
+2. 明确深度表示与单位，确认 pinhole 内参、已注册到 RGB 与已校正状态。没有 manifest 时的初始内参只是编辑起点，**不是标定结果**。
+3. 保存 Scene，设置 ProcessingSpec 并点击“应用处理”。草稿不会改变测量或导出。
+4. 在轨迹模式编辑 CameraPath 与 RenderSpec，再创建导出任务。
+
+Source Archive 是 `.rgbd.zip`，含 Scene、源文件、manifest（若提供）及可选派生 payload。导入 Archive 会验证 hash 和格式，并分配新的 Scene UUID，缓存不会跨 Scene 串用。
+
+## 工程结构
+
+```text
+src/
+  domain/        # Zod 合同、能力、hash、诊断、二进制协议
+  application/   # Workbench 用例与 Library/Processor seam
+  compute/       # 格式解码、点云、轨迹、CPU 渲染、Worker、视频
+  persistence/   # 版本化 IndexedDB、Archive、测试内存实现
+  viewer/        # Three.js 与选择状态
+  features/      # 导入、检查、点云、轨迹 UI
+schemas/         # 由 Zod 生成的 JSON Schema 2020-12
+scripts/         # Schema 生成与漂移检查
+tests/           # 单元/集成测试与三浏览器 E2E
+docs/            # 当前架构、ADR、开发说明、许可证与历史资料
+```
+
+依赖方向：`features → application → domain`；基础设施实现 application 的接口。几何与导出绝不从 Three.js LOD 或可变 UI 重新推算。
+
+## 质量检查
 
 ```bash
-rgbd-workbench open \
-  --rgb ./data/rgb.png \
-  --depth ./data/depth.npy \
-  --workspace-root ./workspace
+npm run check
+npx playwright install chromium firefox webkit
+npm run test:e2e
+npm audit --audit-level=high
 ```
 
-Use `--link` to retain a private reference instead of copying the source. Linked files are checked for
-existence, identity and SHA-256 changes before use. The browser never accepts an arbitrary local path.
+`check` 覆盖格式、lint、严格类型、Schema 漂移、单元/集成测试和生产构建；`npm run check:pages` 额外验证项目子路径下的生产资源与 Worker。E2E 覆盖 Chromium、Firefox、WebKit；视频编码能力按浏览器实际 probe 降级，不把不支持的 codec 记为通过。
 
-Check the local runtime without decoding image contents:
+## GitHub Pages
 
-```bash
-rgbd-workbench doctor --json
-```
+`.github/workflows/pages.yml` 构建并发布静态 `dist/`。项目页使用 `VITE_BASE=/rgbd-workbench/`，用户/组织主页或自定义域可设置为 `/`。
 
-## Depth manifest contract
+在仓库 Settings → Pages 将 Source 选为 **GitHub Actions**。发布的是应用资源，不是用户数据；不要在 `public/` 或构建产物中放 RGB-D 工作区、fixtures 或私人 Archive。
 
-The file extension only selects a decoder. It never selects units. A manifest or the import wizard must
-declare one of:
+## 文档
 
-- `z_depth` with `m`, `mm`, or an explicit `scale_to_meter`;
-- `relative_z` with `unitless`.
+- [系统架构](docs/architecture/system-design.md)
+- [数据与内容规范](docs/architecture/data-formats.md)
+- [开发与贡献](docs/development.md)
+- [架构决策](docs/adr)
+- [第三方许可证](docs/third-party-licenses.md)
 
-Missing semantics leave two-dimensional inspection available but disable geometry-dependent actions.
-Metric point-cloud capability additionally requires equal RGB/depth dimensions, registered-to-RGB
-alignment, pinhole intrinsics, and an undistorted input. The application never guesses these values.
-
-The import manifest uses the project-owned v1 shape shown in
-[`docs/manifest-v1.example.json`](docs/manifest-v1.example.json). `depth.representation` and either
-`depth.unit` or `depth.scale_to_meter` are explicit semantic declarations; `camera` and `alignment`
-are explicit geometry declarations. A producer with a different metadata format must convert it to
-this shape before import. The workbench does not interpret producer-specific sidecars, filenames, or
-numeric ranges as a manifest.
-
-## Workspace safety
-
-Source files and published exports are read-only from the application's perspective. Imports stage and
-hash data before an atomic Scene commit. API responses use opaque IDs and redacted summaries; absolute
-paths are not returned. Derived outputs can be rebuilt from the Scene hash and applied parameters.
-
-## Development
-
-See [`docs/development.md`](docs/development.md) for the M1 test matrix, schema workflow and project
-boundaries. The complete local check is:
-
-```bash
-bash scripts/run-m1-checks.sh
-```
-
-The M2 browser acceptance flow is:
-
-```bash
-npm run test:e2e -- tests/e2e/m1-import.spec.ts tests/e2e/m2-pointcloud.spec.ts
-```
-
-Apply processing before measuring or exporting. Export links always refer to the current applied derivation;
-changing draft parameters alone does not invalidate or silently replace an existing derivation.
+项目当前保持私有，未声明开源许可证。第三方依赖保留各自许可证与来源。
