@@ -8,7 +8,13 @@ import { exportManifestSchema } from "@/domain/export-manifest";
 
 test("imports, derives, exports, and restores an applied scene", async ({ page }) => {
   const pageErrors: string[] = [];
-  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("pageerror", (error) => {
+    pageErrors.push(error.message);
+    console.error("PAGE ERROR", error.message);
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error") console.error("CONSOLE", message.text());
+  });
   await importFixture(page);
   await deriveFixture(page);
   const plyPromise = page.waitForEvent("download");

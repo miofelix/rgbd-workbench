@@ -5,7 +5,7 @@ import type { CameraPath } from "@/domain/trajectory";
 import { createPointCloudScene, type PointCloudScene } from "@/viewer/pointcloud-scene";
 import type { SelectedPoint, ViewSpec } from "@/viewer/types";
 export interface ViewerHandle {
-  capturePng: () => string | null;
+  capturePng: () => Promise<Blob> | null;
   cameraSnapshot: () => import("@/viewer/pointcloud-scene").ViewerCameraSnapshot | null;
   selectPixel: (pixelIndex: number) => SelectedPoint | null;
 }

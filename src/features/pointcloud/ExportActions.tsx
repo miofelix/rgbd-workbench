@@ -47,14 +47,9 @@ export function ExportActions({
         className="secondary"
         aria-label="下载 PNG"
         type="button"
-        onClick={() => {
-          const url = viewerRef.current?.capturePng();
-          if (url) {
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = `${name}-pointcloud.png`;
-            a.click();
-          }
+        onClick={async () => {
+          const blob = await viewerRef.current?.capturePng();
+          if (blob) downloadBlob(blob, `${name}-pointcloud.png`);
         }}
       >
         <Camera size={15} />

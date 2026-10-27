@@ -19,7 +19,7 @@ export interface PointCloudScene {
   setView(view: ViewSpec): void;
   setSelection(points: readonly SelectedPoint[]): void;
   setTrajectory(path: CameraPath | null, frame: number, fps: number): void;
-  capturePng(): string;
+  capturePng(): Promise<Blob>;
   cameraSnapshot(): ViewerCameraSnapshot;
   selectPixel(pixelIndex: number): SelectedPoint | null;
   dispose(): void;
@@ -281,9 +281,11 @@ export function createPointCloudScene(
         orthoScale: Math.max(0.001, orthographic.top),
       };
     },
-    capturePng() {
+    async capturePng() {
       renderer.render(scene, camera);
-      return canvas.toDataURL("image/png");
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!blob) throw new Error("PNG capture failed");
+      return blob;
     },
     dispose() {
       disposed = true;

@@ -4,6 +4,10 @@ import { unzipSync } from "fflate";
 import { readFile } from "node:fs/promises";
 
 test("edits keyframes and exports the split-layout video", async ({ page }) => {
+  page.on("pageerror", (error) => console.error("PAGE ERROR", error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") console.error("CONSOLE", message.text());
+  });
   await importFixture(page);
   await deriveFixture(page);
   await shortVideoSettings(page);
